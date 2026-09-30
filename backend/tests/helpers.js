@@ -50,6 +50,7 @@ async function startTestServer() {
   });
 
   const base = `http://127.0.0.1:${server.address().port}/api`;
+  const port = server.address().port;
 
   const request = async (method, url, { body, token } = {}) => {
     const res = await fetch(base + url, {
@@ -70,6 +71,8 @@ async function startTestServer() {
   };
 
   return {
+    port,
+    origin: `http://127.0.0.1:${port}`,
     get: (url, opts) => request('GET', url, opts),
     post: (url, body, opts) => request('POST', url, { ...opts, body }),
     put: (url, body, opts) => request('PUT', url, { ...opts, body }),

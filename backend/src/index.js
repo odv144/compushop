@@ -2,26 +2,36 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const routes = require('./routes');
+const { buildCorsConfig, isOriginAllowed } = require('./config/cors');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-// Orígenes permitidos (local + producción Vercel)
-const allowedOrigins = [
-  'http://localhost:5173',
-  'http://localhost:3000',
-  'http://127.0.0.1:5173',
-  'https://compushop-dun.vercel.app',
-  process.env.FRONTEND_URL,
-].filter(Boolean);
+// Allowlist explicita. No hay comodin de *.vercel.app: cualquier subdominio
+// de Vercel podria llamar a la API. Los preview deployments se habilitan a
+// proposito con ALLOWED_ORIGIN_PATTERNS.
+const corsConfig = buildCorsConfig(process.env);
+
+// Middleware de rechazo: CORS por si solo solo impide LEER la respuesta; el
+// request igual se ejecuta. Como hay endpoints publicos con efecto (POST
+// /orders, POST /contact), un origen no permitido se corta con 403 antes de
+// hacer trabajo.
+function corsGuard(req, res, next) {
+  const { allowed, reason } = isOriginAllowed(req.headers.origin, corsConfig);
+  if (allowed) return next();
+
+  console.warn(`CORS bloqueado (${reason}): ${req.headers.origin}`);
+  return res.status(403).json({ error: 'Origen no permitido' });
+}
+
+app.use(corsGuard);
 
 app.use(cors({
   origin(origin, callback) {
-    // Permitir requests sin Origin (curl, healthchecks) y los listados
-    if (!origin || allowedOrigins.includes(origin) || /\.vercel\.app$/.test(origin || '')) {
+    if (isOriginAllowed(origin, corsConfig).allowed) {
       return callback(null, true);
     }
-    return callback(new Error(`CORS bloqueado para origen: ${origin}`));
+    return callback(null, false);
   },
   credentials: true,
 }));
