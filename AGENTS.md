@@ -230,10 +230,10 @@ Base URL local: `http://localhost:4000/api`
 | Variable | Requerida | Descripción |
 |----------|-----------|-------------|
 | `PORT` | no | Default `4000` |
-| `JWT_SECRET` | **sí en prod** | Secreto de firma JWT |
+| `JWT_SECRET` | **obligatoria en prod** | Secreto de firma JWT. Sin ella el server **falla al arrancar** en producción (no hay fallback). |
 | `JWT_EXPIRES_IN` | no | Default `7d` |
-| `FRONTEND_URL` | recomendada | Origen CORS del front (ej. URL Vercel) |
-| `SMTP_*` / settings en DB | opcional | Email real; si falta, se guarda mensaje y en forgot puede devolver `dev_token` |
+| `FRONTEND_URL` | recomendada | Origen CORS del front **y** host del link de recuperación de contraseña |
+| `SMTP_*` / settings en DB | opcional | Email real; si falta, el mensaje se guarda igual. `dev_token` solo se devuelve fuera de producción |
 
 ### Frontend (`VITE_*` en build)
 | Variable | Requerida | Descripción |
@@ -286,8 +286,8 @@ compushop/
 2. **Imágenes:** solo URLs externas; no hay upload de archivos.
 3. **Pagos:** no hay pasarela (Mercado Pago / Stripe); el “pedido” es registro operativo.
 4. **Servicio detalle:** ruta de detalle de servicio en front no está tan completa como la de producto (catálogo sí).
-5. **sql.js** figura en `package.json` del backend pero la persistencia activa es el store JSON.
-6. **Emails:** dependen de SMTP configurado en settings/dashboard; sin SMTP el flujo no falla del todo (guarda mensaje / dev_token en forgot).
+5. **Capa `database.js` muerta (importante):** `src/db/database.js` (~500 líneas) simula una API tipo `better-sqlite3`, pero **no es SQL real** — parsea el string de la query con `.startsWith('INSERT INTO USERS')` y lo despacha a handlers hardcodeados. Además `src/db/database.js` usa `_meta.nextId` mientras `src/db/store.js` usa `seq`, y sus entidades de settings difieren (array de filas vs objeto key/value), por lo que sus datos no son intercambiables. Solo lo importan 7 controllers (`products`, `services`, `orders`, `users`, `categories`, `contact`, `dashboard`, `settings`) que **`routes/index.js` nunca carga**. La lógica viva va inline en `routes/index.js` contra `store.js`. **NoTomar `database.js` ni esos controllers como referencia de arquitectura** — están desconectados. Al borrar, borrar también `sql.js` del `package.json`.
+6. **Emails:** dependen de SMTP configurado en settings/dashboard; sin SMTP el flujo no falla del todo (guarda el mensaje). `dev_token` de forgot-password solo se devuelve fuera de producción.
 
 ---
 
@@ -315,6 +315,7 @@ Al modificar o extender Compushop:
 6. Preservar paleta azul `brand` y estilo de UI (pill navbar, radii grandes) salvo pedido explícito de rediseño.
 7. Variables `VITE_*` requieren **rebuild/redeploy** del frontend en Vercel.
 8. No commitear `.env` ni `data.json` con secretos o datos sensibles.
+9. **Nunca confiar precio, nombre ni existencia vindos del body del cliente.** `POST /orders` los resuelve desde el store (`routes/index.js`). Un `curl` puede mandar cualquier `price`; si se usa ese valor, es una pérdida de plata directa. Misma regla aplica a cualquier cantidad usada para aritmética: validar entero ≥ 1 (un `quantity` negativo incrementaba el stock).
 
 ---
 
