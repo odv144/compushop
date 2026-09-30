@@ -186,16 +186,35 @@ router.post('/orders', optionalAuth, (req, res) => {
     if (!customer_name || !customer_email) return res.status(400).json({ error: 'Nombre y email obligatorios' });
 
     const db = store.get();
-    const total = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
-    const orderNumber = `CS${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Math.floor(Math.random() * 9000 + 1000)}`;
 
-    // Stock check
+    // Resolución server-side: precio, nombre y existencia NUNCA se confían al body.
+    // El cliente es un atacante hasta que se demuestre lo contrario.
+    const resolved = [];
     for (const item of items) {
-      if (item.type === 'product') {
-        const p = db.products.find(x => x.id === item.id);
-        if (!p || p.stock < item.quantity) return res.status(400).json({ error: `Stock insuficiente: ${item.name}` });
+      const type = item.type === 'service' ? 'service' : 'product';
+      const source = type === 'service'
+        ? db.services.find(s => (s.id == item.id || s.slug === item.id) && s.is_active)
+        : db.products.find(p => (p.id == item.id || p.slug === item.id) && p.is_active);
+      if (!source) return res.status(400).json({ error: `Producto o servicio no disponible: ${item.name || item.id}` });
+
+      const qty = Number(item.quantity);
+      if (!Number.isInteger(qty) || qty < 1) {
+        return res.status(400).json({ error: 'Cantidad inválida' });
       }
+      const price = Number(source.price);
+      if (!Number.isFinite(price) || price < 0) {
+        return res.status(400).json({ error: `Precio inválido para: ${source.name}` });
+      }
+
+      if (type === 'product' && source.stock < qty) {
+        return res.status(400).json({ error: `Stock insuficiente: ${source.name}` });
+      }
+
+      resolved.push({ id: source.id, type, name: source.name, price, quantity: qty });
     }
+
+    const total = resolved.reduce((sum, i) => sum + i.price * i.quantity, 0);
+    const orderNumber = `CS${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Math.floor(Math.random() * 9000 + 1000)}`;
 
     const order = {
       id: store.next('orders'),
@@ -212,7 +231,7 @@ router.post('/orders', optionalAuth, (req, res) => {
     db.orders.push(order);
 
     const orderItems = [];
-    for (const item of items) {
+    for (const item of resolved) {
       const oi = {
         id: store.next('order_items'),
         order_id: order.id,

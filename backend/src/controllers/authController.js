@@ -85,7 +85,10 @@ function forgotPassword(req, res) {
 
     sendPasswordResetEmail(user, token).then(result => {
       const response = { message: 'Si el DNI existe en nuestros registros, recibirás un email con instrucciones.' };
-      if (!result.sent && result.token) {
+      // El token de reset solo puede filtrarse en desarrollo: en producción esto
+      // permitiría resetear la contraseña de cualquier cuenta registrada.
+      const isProd = process.env.NODE_ENV === 'production' || !!process.env.VERCEL;
+      if (!isProd && !result.sent && result.token) {
         response.dev_token = result.token;
         response.dev_note = 'SMTP no configurado. Usá este token para probar.';
       }

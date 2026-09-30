@@ -46,7 +46,10 @@ async function sendPasswordResetEmail(user, token) {
     console.warn('⚠️  SMTP no configurado.');
     return { sent: false, token };
   }
-  const resetUrl = `http://localhost:5173/recuperar-clave?token=${token}`;
+  // El token se lee en /reset-password (ver frontend App.jsx), no en /recuperar-clave.
+  // getSetting ya resuelve FRONTEND_URL desde env; el default cubre desarrollo local.
+  const baseUrl = getSetting('frontend_url', 'http://localhost:5173');
+  const resetUrl = `${baseUrl.replace(/\/+$/, '')}/reset-password?token=${encodeURIComponent(token)}`;
   try {
     await transporter.sendMail({
       from, to: user.email,
