@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "seed": "node src/db/seed.js"
+    "seed": "node src/db/seed.js",
+    "test": "node --test tests/"
   },
   "keywords": [
     "ecommerce",
@@ -22,7 +23,6 @@
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
     "nodemailer": "^10.0.13",
-    "sql.js": "^1.12.0",
     "uuid": "^11.0.3"
   }
 }

@@ -286,7 +286,7 @@ compushop/
 2. **Imágenes:** solo URLs externas; no hay upload de archivos.
 3. **Pagos:** no hay pasarela (Mercado Pago / Stripe); el “pedido” es registro operativo.
 4. **Servicio detalle:** ruta de detalle de servicio en front no está tan completa como la de producto (catálogo sí).
-5. **Capa `database.js` muerta (importante):** `src/db/database.js` (~500 líneas) simula una API tipo `better-sqlite3`, pero **no es SQL real** — parsea el string de la query con `.startsWith('INSERT INTO USERS')` y lo despacha a handlers hardcodeados. Además `src/db/database.js` usa `_meta.nextId` mientras `src/db/store.js` usa `seq`, y sus entidades de settings difieren (array de filas vs objeto key/value), por lo que sus datos no son intercambiables. Solo lo importan 7 controllers (`products`, `services`, `orders`, `users`, `categories`, `contact`, `dashboard`, `settings`) que **`routes/index.js` nunca carga**. La lógica viva va inline en `routes/index.js` contra `store.js`. **NoTomar `database.js` ni esos controllers como referencia de arquitectura** — están desconectados. Al borrar, borrar también `sql.js` del `package.json`.
+5. **~~Capa `database.js`~~ (RESUELTO):** la capa `database.js` (shim falso tipo `better-sqlite3` que parseaba queries con `.startsWith(...)`) y los 7 controllers que la usaban fueron **eliminados** — nunca estuvieron conectados a `routes/index.js`. Ahora `src/db/` solo tiene `store.js` (persistencia activa) y `seed.js`, y `src/controllers/` solo `authController.js`. `sql.js` fue quitado de `package.json`. **Guardas activas en `backend/tests/architecture.test.js`** que fallan si alguien reintroduce la capa.
 6. **Emails:** dependen de SMTP configurado en settings/dashboard; sin SMTP el flujo no falla del todo (guarda el mensaje). `dev_token` de forgot-password solo se devuelve fuera de producción.
 
 ---
@@ -296,10 +296,23 @@ compushop/
 ```bash
 # Backend
 cd backend && npm install && npm run seed && npm start
+npm test                                  # 65 tests (node:test, sin deps)
 
 # Frontend
 cd frontend && npm install && npm run dev
 ```
+
+### Tests del backend
+`backend/tests/` usa el runner nativo de Node (`node --test`, sin dependencias extra).
+Hacen backup y restauran `src/db/data.json`, asi que se pueden correr contra datos reales.
+
+| Archivo | Que cubre |
+|---------|-----------|
+| `orders.security.test.js` | Regresion del exploit de precio: precio/nombre resueltos server-side, quantity entero ≥ 1, stock, productos inactivos, servicios |
+| `auth.security.test.js` | Login, `/auth/me`, fail-fast de `JWT_SECRET`, `alg:none`, expiracion, `dev_token` solo en dev, roles (403), IDOR en pedidos, no auto-borrado, no hash filtrado |
+| `architecture.test.js` | Guardas de estructura: no reintroducir `database.js` ni controllers muertos, imports no rotos, y reglas de seguridad (precio server-side, HS256 pin, link de reset) |
+
+Un fallo en cualquiera de estos = regresion de seguridad o de estructura. No ignorar.
 
 ---
 
