@@ -4,7 +4,15 @@ const store = require('../db/store');
 const { generateToken } = require('../utils/jwt');
 const { sendPasswordResetEmail } = require('../utils/email');
 
-function register(req, res) {
+/**
+ * Hash señuelo. Cuando el email no existe hay que comparar contra algo igual
+ * de costoso que un bcrypt real: si seRespondiera de inmediato, el atacante
+ * mide que la respuesta fue mas rapida y deduce que el usuario NO existe.
+ * El mensaje es el mismo, pero el costo tiene que ser el mismo tambien.
+ */
+const DUMMY_HASH = '$2a$10$yjMOm8TFqInPHoJviaA8UOanEnbgbVQuai3lMwDI8PMRXI6cmHkVe';
+
+async function register(req, res) {
   try {
     const { name, email, password, dni, phone, address } = req.body;
     if (!name || !email || !password) return res.status(400).json({ error: 'Nombre, email y contraseña son obligatorios' });
@@ -17,7 +25,7 @@ function register(req, res) {
     const user = {
       id: store.next('users'),
       name, email,
-      password: bcrypt.hashSync(password, 10),
+      password: await bcrypt.hash(password, 10),
       dni: dni || null, role: 'customer',
       phone: phone || null, address: address || null,
       created_at: new Date().toISOString(),
@@ -33,13 +41,16 @@ function register(req, res) {
   }
 }
 
-function login(req, res) {
+async function login(req, res) {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email y contraseña son obligatorios' });
 
     const user = store.get().users.find(u => u.email === email);
-    if (!user || !bcrypt.compareSync(password, user.password)) {
+    // Se compara SIEMPRE, exista o no el usuario, para que el tiempo de
+    // respuesta no delate quais emails estan registrados.
+    const ok = await bcrypt.compare(password, user ? user.password : DUMMY_HASH);
+    if (!user || !ok) {
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
     const { password: _, ...safe } = user;
@@ -100,7 +111,7 @@ function forgotPassword(req, res) {
   }
 }
 
-function resetPassword(req, res) {
+async function resetPassword(req, res) {
   try {
     const { token, newPassword } = req.body;
     if (!token || !newPassword) return res.status(400).json({ error: 'Token y nueva contraseña son obligatorios' });
@@ -113,7 +124,7 @@ function resetPassword(req, res) {
     const user = db.users.find(u => u.id === reset.user_id);
     if (!user) return res.status(400).json({ error: 'Usuario no encontrado' });
 
-    user.password = bcrypt.hashSync(newPassword, 10);
+    user.password = await bcrypt.hash(newPassword, 10);
     reset.used = true;
     store.persist();
 

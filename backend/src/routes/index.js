@@ -7,13 +7,16 @@ const { generateToken } = require('../utils/jwt');
 const { authenticate, requireAdmin, optionalAuth } = require('../middleware/auth');
 const { sendContactEmail, sendPasswordResetEmail } = require('../utils/email');
 const authCtrl = require('../controllers/authController');
+const rateLimit = require('../config/rateLimit');
 
 // ========== AUTH ==========
-router.post('/auth/register', authCtrl.register);
-router.post('/auth/login', authCtrl.login);
+// bcrypt bloquea el event loop: sin estos limites, unos cuantos logins
+// simultaneos dejan el server colgado para todos los usuarios.
+router.post('/auth/register', rateLimit.registerLimiter(), authCtrl.register);
+router.post('/auth/login', rateLimit.authLimiter(), authCtrl.login);
 router.get('/auth/me', authenticate, authCtrl.me);
-router.post('/auth/forgot-password', authCtrl.forgotPassword);
-router.post('/auth/reset-password', authCtrl.resetPassword);
+router.post('/auth/forgot-password', rateLimit.forgotPasswordLimiter(), authCtrl.forgotPassword);
+router.post('/auth/reset-password', rateLimit.resetPasswordLimiter(), authCtrl.resetPassword);
 
 function slugify(t) {
   return t.toString().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
@@ -179,7 +182,7 @@ router.delete('/services/:id', authenticate, requireAdmin, (req, res) => {
 });
 
 // ========== ORDERS ==========
-router.post('/orders', optionalAuth, (req, res) => {
+router.post('/orders', rateLimit.orderLimiter(), optionalAuth, (req, res) => {
   try {
     const { items, shipping_address, notes, customer_name, customer_email, customer_phone } = req.body;
     if (!items?.length) return res.status(400).json({ error: 'El pedido debe tener al menos un ítem' });
@@ -296,14 +299,14 @@ router.get('/users', authenticate, requireAdmin, (req, res) => {
   res.json({ users: list, pagination: { page: 1, limit: 100, total: list.length, pages: 1 } });
 });
 
-router.put('/users/:id', authenticate, requireAdmin, (req, res) => {
+router.put('/users/:id', authenticate, requireAdmin, async (req, res) => {
   const db = store.get();
   const user = db.users.find(u => u.id == req.params.id);
   if (!user) return res.status(404).json({ error: 'No encontrado' });
   ['name', 'email', 'dni', 'role', 'phone', 'address'].forEach(f => {
     if (req.body[f] !== undefined) user[f] = req.body[f];
   });
-  if (req.body.password) user.password = bcrypt.hashSync(req.body.password, 10);
+  if (req.body.password) user.password = await bcrypt.hash(req.body.password, 10);
   store.persist();
   const { password, ...safe } = user;
   res.json({ message: 'Actualizado', user: safe });
@@ -320,7 +323,7 @@ router.delete('/users/:id', authenticate, requireAdmin, (req, res) => {
 });
 
 // ========== CONTACT ==========
-router.post('/contact', async (req, res) => {
+router.post('/contact', rateLimit.contactLimiter(), async (req, res) => {
   const { name, email, phone, subject, message } = req.body;
   if (!name || !email || !message) return res.status(400).json({ error: 'Nombre, email y mensaje obligatorios' });
   const db = store.get();

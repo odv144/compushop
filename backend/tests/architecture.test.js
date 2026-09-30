@@ -53,6 +53,56 @@ describe('Controllers', () => {
   });
 });
 
+describe('bcrypt en el request path', () => {
+  // hashSync/compareSync bloquean el event loop. Con login y registro abiertos
+  // al publico, unos cuantos requests concurrentes cuelgan el server para
+  // TODOS los usuarios. Solo se tolera en el seed, que corre una vez por CLI.
+  const ALLOWED_SYNC = ['db/seed.js'];
+
+  /** Saca comentarios: mentioning la API en un comentario no es usarla. */
+  const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+  const filesInRequestPath = () => {
+    const out = [];
+    for (const dir of [CONTROLLERS, path.join(SRC, 'routes'), path.join(SRC, 'middleware'), path.join(SRC, 'utils'), path.join(SRC, 'config')]) {
+      out.push(...readAll(dir));
+    }
+    return out;
+  };
+
+  test('no hay hashSync ni compareSync en controllers, routes ni utils', () => {
+    for (const { file, content } of filesInRequestPath()) {
+      const rel = path.relative(SRC, path.join(file)).replace(/\\/g, '/');
+      if (ALLOWED_SYNC.includes(rel)) continue;
+      assert.ok(
+        !/bcrypt\.(hashSync|compareSync)/.test(stripComments(content)),
+        `${rel} usa bcrypt sincronico y bloquea el event loop`
+      );
+    }
+  });
+
+  test('los handlers de auth son async', () => {
+    const src = fs.readFileSync(path.join(CONTROLLERS, 'authController.js'), 'utf8');
+    for (const fn of ['register', 'login', 'resetPassword']) {
+      assert.ok(
+        new RegExp(`async function ${fn}\\s*\\(`).test(src),
+        `${fn} deberia ser async para no bloquear con bcrypt`
+      );
+    }
+  });
+
+  test('login compara contra un hash senuelo cuando el usuario no existe', () => {
+    // Sin esto, un email inexistente responde mas rapido que uno con password
+    // mala: midiendo el tiempo de respuesta se enumeran los usuarios validos.
+    const src = fs.readFileSync(path.join(CONTROLLERS, 'authController.js'), 'utf8');
+    assert.ok(/DUMMY_HASH/.test(src), 'debe existir el hash senuelo');
+    assert.ok(
+      /user\s*\?\s*user\.password\s*:\s*DUMMY_HASH/.test(src),
+      'login debe comparar SIEMPRE, exista o no el usuario'
+    );
+  });
+});
+
 describe('Grafo de imports del backend', () => {
   // Recorre archivos .js en profundidad, sin reventar con archivos sueltos.
   const walk = (dir) => {
