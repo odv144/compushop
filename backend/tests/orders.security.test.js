@@ -137,6 +137,47 @@ describe('POST /orders - existencia y stock', () => {
     assert.equal(r.status, 201);
     assert.equal(await stockOf(product.id), before - 2);
   });
+
+  // Regresion: el check de stock corria item por item contra el stock SIN
+  // descontar, en un loop separado del que hacia el descuento. Mandar el mismo
+  // producto dos veces pasaba los dos checks y dejaba el stock en negativo.
+  test('el MISMO producto dos veces no puede dejar el stock en negativo', async () => {
+    const scarce = createTestProduct({ name: 'Stock Escaso', price: 1000, stock: 1 });
+
+    const r = await order([
+      { id: scarce.id, type: 'product', quantity: 1 },
+      { id: scarce.id, type: 'product', quantity: 1 },
+    ]);
+
+    assert.equal(r.status, 400, 'stock=1 no alcanza para 2 unidades del mismo producto');
+    assert.equal(await stockOf(scarce.id), 1, 'el stock no puede quedar en negativo');
+  });
+
+  test('cantidades agregadas del mismo producto se suman para validar stock', async () => {
+    const scarce = createTestProduct({ name: 'Stock Escaso Dos', price: 1000, stock: 3 });
+
+    const r = await order([
+      { id: scarce.id, type: 'product', quantity: 2 },
+      { id: scarce.id, type: 'product', quantity: 3 },
+    ]);
+
+    assert.equal(r.status, 400, '2+3=5 supera el stock=3 aunque cada item pase solo');
+    assert.equal(await stockOf(scarce.id), 3);
+  });
+
+  test('el agregado no rompe el caso valido: mismo producto 2 veces con stock suficiente', async () => {
+    const ok = createTestProduct({ name: 'Stock Suficiente', price: 1000, stock: 10 });
+
+    const r = await order([
+      { id: ok.id, type: 'product', quantity: 2 },
+      { id: ok.id, type: 'product', quantity: 3 },
+    ]);
+
+    assert.equal(r.status, 201);
+    assert.equal(await stockOf(ok.id), 5, 'descuenta la suma de las dos lineas');
+    assert.equal(r.body.order.items.length, 2, 'mantiene las dos lineas del pedido');
+    assert.equal(r.body.order.total, 1000 * 5, 'el total suma ambas lineas');
+  });
 });
 
 describe('POST /orders - servicios', () => {

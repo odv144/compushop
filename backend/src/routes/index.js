@@ -230,6 +230,11 @@ router.post('/orders', rateLimit.orderLimiter(), optionalAuth, (req, res) => {
     // Resolución server-side: precio, nombre y existencia NUNCA se confían al body.
     // El cliente es un atacante hasta que se demuestre lo contrario.
     const resolved = [];
+    // Cantidad pedida por producto, agregada ANTES de validar stock.
+    // Validar cada item por separado contra el stock sin descontar permitia que
+    // el mismo producto N veces en un pedido pasara N checks y dejara el stock
+    // en negativo: stock=1 con el mismo producto dos veces => -1.
+    const requestedByProduct = new Map();
     for (const item of items) {
       const type = item.type === 'service' ? 'service' : 'product';
       const source = type === 'service'
@@ -246,11 +251,20 @@ router.post('/orders', rateLimit.orderLimiter(), optionalAuth, (req, res) => {
         return res.status(400).json({ error: `Precio inválido para: ${source.name}` });
       }
 
-      if (type === 'product' && source.stock < qty) {
-        return res.status(400).json({ error: `Stock insuficiente: ${source.name}` });
+      if (type === 'product') {
+        requestedByProduct.set(source.id, (requestedByProduct.get(source.id) || 0) + qty);
       }
 
       resolved.push({ id: source.id, type, name: source.name, price, quantity: qty });
+    }
+
+    // Stock validado contra la cantidad TOTAL pedida por producto, no item por item.
+    for (const [productId, totalQty] of requestedByProduct) {
+      const p = db.products.find(x => x.id === productId);
+      const available = p ? Number(p.stock) : 0;
+      if (!p || !Number.isFinite(available) || available < totalQty) {
+        return res.status(400).json({ error: `Stock insuficiente: ${p ? p.name : 'producto'}` });
+      }
     }
 
     const total = resolved.reduce((sum, i) => sum + i.price * i.quantity, 0);
