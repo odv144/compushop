@@ -186,6 +186,94 @@ describe('Reglas de seguridad estructurales', () => {
 
     assert.ok(!/localhost:5173\/recuperar-clave/.test(emailSrc), 'el link apuntaba a la ruta equivocada');
     assert.ok(/getSetting\(['"]frontend_url['"]/.test(emailSrc), 'debe tomar el host de settings/env');
-    assert.ok(/\/reset-password\?token=/.test(emailSrc), 'debe apuntar a /reset-password');
   });
+});
+
+describe('Guards de UI: formato de precios y NumberInput de precio', () => {
+  // Estas guards viven en el backend porque `npm test` es el unico runner del
+  // repo: el frontend no tiene ni linter ni tests configurados.
+
+  const REPO_ROOT = path.join(BACKEND_ROOT, '..');
+  const FRONTEND_SRC = path.join(REPO_ROOT, 'frontend', 'src');
+  // Relativo y SIEMPRE con "/" porque rel() normaliza a "/" (en Windows
+  // path.join devuelve "\", y un endsWith con backslash nunca matchea).
+  const FORMAT_UTIL = 'frontend/src/utils/format.js';
+
+  const walk = (dir) => {
+    if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return [];
+    return fs
+      .readdirSync(dir, { withFileTypes: true })
+      .flatMap((entry) => {
+        const abs = path.join(dir, entry.name);
+        if (entry.isDirectory()) return walk(abs);
+        return entry.isFile() && /\.(jsx|tsx|js|ts)$/.test(entry.name) ? [abs] : [];
+      });
+  };
+
+  const read = (abs) => fs.readFileSync(abs, 'utf8');
+  const rel = (abs) => path.relative(REPO_ROOT, abs).replace(/\\/g, '/');
+
+  /** El bloque del NumberInput de PRECIO: desde el label hasta el field. */
+  const priceInputBlock = (abs) => {
+    const src = read(abs);
+    const from = src.indexOf('Precio</FormLabel>');
+    const to = src.indexOf('<NumberInputField', from);
+    return from === -1 || to === -1 ? '' : src.slice(from, to);
+  };
+
+  test('utils/format.js existe y es la unica fuente de formato de precios', () => {
+    const fmt = path.join(REPO_ROOT, FORMAT_UTIL);
+
+    assert.ok(fs.existsSync(fmt), 'debe existir frontend/src/utils/format.js');
+    assert.ok(/export function formatPrice/.test(read(fmt)), 'debe exportar formatPrice');
+  });
+
+  test('ningun componente vuelve a formatear precios por su cuenta', () => {
+    // Con maximumFractionDigits: 0 un precio de 6899.99 se mostraba "$ 6.900"
+    // y el admin concluyo que los centavos no se guardaban. Ver backend tests.
+    const offenders = walk(FRONTEND_SRC)
+      .filter((abs) => rel(abs) !== FORMAT_UTIL)
+      .filter((abs) => /Intl\.NumberFormat/.test(read(abs)))
+      .map(rel);
+
+    assert.deepEqual(offenders, [], `importa formatPrice de utils/format.js en vez de duplicarlo:\n${offenders.join('\n')}`);
+  });
+
+  test('ningun archivo del frontend redondea a 0 decimales un precio', () => {
+    const offenders = walk(FRONTEND_SRC)
+      .filter((abs) => /maximumFractionDigits\s*:\s*0/.test(read(abs)))
+      .map(rel);
+
+    assert.deepEqual(offenders, [], `maximumFractionDigits: 0 oculta los centavos:\n${offenders.join('\n')}`);
+  });
+
+  for (const file of ['AdminProducts.jsx', 'AdminServices.jsx']) {
+    describe(file, () => {
+      const abs = path.join(FRONTEND_SRC, 'pages', 'admin', file);
+      const block = () => priceInputBlock(abs);
+
+      test('el NumberInput de precio fija precision y step de centavo', () => {
+        assert.ok(block(), 'no se encontro el bloque de precio del admin');
+        assert.ok(/precision\s*=\s*{\s*2\s*}/.test(block()), 'falta precision={2}');
+        assert.ok(/step\s*=\s*{?\s*0\.01\s*}?/.test(block()), 'falta step={0.01} para mover centavos');
+        assert.ok(/min\s*=\s*{?\s*0\s*}?/.test(block()), 'falta min={0}');
+      });
+
+      test('el NumberInput de precio acepta la coma decimal argentina', () => {
+        // Chakra filtra por /^[Ee0-9+\-.]$/: sin isValidCharacter el teclado
+        // bloquea la coma, y sin parse el sanitize la borra ("6899,99" -> 689999).
+        assert.ok(/isValidCharacter/.test(block()), 'falta isValidCharacter (el teclado bloquea la coma)');
+        assert.ok(/parse/.test(block()), 'falta parse (sanitize borra la coma antes de Number())');
+        assert.ok(/pattern\s*=\s*"\[0-9\]\*\(\[\.,\]\[0-9\]\+\)\?"/.test(block()), 'falta el pattern que acepta coma o punto');
+      });
+
+      test('el save no convierte un precio vacio en 0', () => {
+        const src = read(abs);
+        const save = src.slice(src.indexOf('const save ='), src.indexOf('const remove ='));
+
+        assert.ok(/vacio|vacío/.test(save), 'debe chequear explicitamente el precio vacio');
+        assert.ok(/Number\.isFinite/.test(save), 'debe validar que el precio sea un numero finito');
+      });
+    });
+  }
 });

@@ -7,9 +7,7 @@ import {
 import { FiShoppingCart } from 'react-icons/fi';
 import api from '../api/client';
 import { useCart } from '../context/CartContext';
-
-const formatPrice = (n) =>
-  new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n);
+import { formatPrice } from '../utils/format';
 
 export default function ProductDetail() {
   const { id } = useParams();

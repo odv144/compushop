@@ -4,9 +4,7 @@ import {
   Spinner, Center, useColorModeValue, Badge,
 } from '@chakra-ui/react';
 import api from '../../api/client';
-
-const formatPrice = (n) =>
-  new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n || 0);
+import { formatPrice } from '../../utils/format';
 
 export default function Dashboard() {
   const [data, setData] = useState(null);
@@ -25,7 +23,8 @@ export default function Dashboard() {
     { label: 'Pedidos', value: data.stats.ordersCount },
     { label: 'Pendientes', value: data.stats.pendingOrders },
     { label: 'Mensajes sin leer', value: data.stats.unreadMessages },
-    { label: 'Ingresos', value: formatPrice(data.stats.revenue) },
+    // ?? 0 explicito: "sin ventas" es un dato valido ($0), no un dato ausente.
+    { label: 'Ingresos', value: formatPrice(data.stats.revenue ?? 0) },
   ];
 
   return (

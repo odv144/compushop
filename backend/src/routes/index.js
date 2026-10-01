@@ -23,6 +23,24 @@ function slugify(t) {
     .replace(/\s+/g, '-').replace(/[^\w-]+/g, '').replace(/--+/g, '-');
 }
 
+const PRECIO_INVALIDO = 'Precio inválido: debe ser un número mayor o igual a 0';
+
+/**
+ * Normaliza un precio que viene del body. Devuelve null si no es utilizable.
+ *
+ * Number('') === 0 y Number(null) === 0, asi que sin este chequeo un campo
+ * vacio guardaba el producto en $0 y un `{"price":"abc"}` entraba al store
+ * como NaN. Solo se aceptan number o string: booleanos, arrays y objetos
+ * ("abc", true, []) no son precios.
+ */
+function parsePrice(raw) {
+  if (typeof raw !== 'number' && typeof raw !== 'string') return null;
+  if (typeof raw === 'string' && raw.trim() === '') return null;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) return null;
+  return value;
+}
+
 // ========== CATEGORIES ==========
 router.get('/categories', (req, res) => {
   const db = store.get();
@@ -93,11 +111,13 @@ router.get('/products/:id', (req, res) => {
 router.post('/products', authenticate, requireAdmin, (req, res) => {
   const { name, description, price, stock, category_id, brand, image, specs, is_active = true } = req.body;
   if (!name || price === undefined) return res.status(400).json({ error: 'Nombre y precio obligatorios' });
+  const precio = parsePrice(price);
+  if (precio === null) return res.status(400).json({ error: PRECIO_INVALIDO });
   const db = store.get();
   let slug = slugify(name);
   if (db.products.find(p => p.slug === slug)) slug += '-' + Date.now();
   const product = {
-    id: store.next('products'), name, slug, description: description || null, price, stock: stock || 0,
+    id: store.next('products'), name, slug, description: description || null, price: precio, stock: stock || 0,
     category_id: category_id || null, brand: brand || null, image: image || null, specs: specs || null,
     is_active: !!is_active, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
   };
@@ -110,8 +130,16 @@ router.put('/products/:id', authenticate, requireAdmin, (req, res) => {
   const db = store.get();
   const p = db.products.find(x => x.id == req.params.id);
   if (!p) return res.status(404).json({ error: 'No encontrado' });
-  const fields = ['name', 'description', 'price', 'stock', 'category_id', 'brand', 'image', 'specs', 'is_active'];
+  // Validamos ANTES de mutar: si el precio es invalido el 400 tiene que salir
+  // sin haber tocado el producto en memoria.
+  let precio;
+  if (req.body.price !== undefined) {
+    precio = parsePrice(req.body.price);
+    if (precio === null) return res.status(400).json({ error: PRECIO_INVALIDO });
+  }
+  const fields = ['name', 'description', 'stock', 'category_id', 'brand', 'image', 'specs', 'is_active'];
   fields.forEach(f => { if (req.body[f] !== undefined) p[f] = req.body[f]; });
+  if (precio !== undefined) p.price = precio;
   if (req.body.name && req.body.name !== p.name) {
     p.slug = slugify(req.body.name);
   }
@@ -146,11 +174,13 @@ router.get('/services/:id', (req, res) => {
 router.post('/services', authenticate, requireAdmin, (req, res) => {
   const { name, description, price, duration, image, is_active = true } = req.body;
   if (!name || price === undefined) return res.status(400).json({ error: 'Nombre y precio obligatorios' });
+  const precio = parsePrice(price);
+  if (precio === null) return res.status(400).json({ error: PRECIO_INVALIDO });
   const db = store.get();
   let slug = slugify(name);
   if (db.services.find(s => s.slug === slug)) slug += '-' + Date.now();
   const service = {
-    id: store.next('services'), name, slug, description: description || null, price,
+    id: store.next('services'), name, slug, description: description || null, price: precio,
     duration: duration || null, image: image || null, is_active: !!is_active,
     created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
   };
@@ -163,9 +193,16 @@ router.put('/services/:id', authenticate, requireAdmin, (req, res) => {
   const db = store.get();
   const s = db.services.find(x => x.id == req.params.id);
   if (!s) return res.status(404).json({ error: 'No encontrado' });
-  ['name', 'description', 'price', 'duration', 'image', 'is_active'].forEach(f => {
+  // Validamos ANTES de mutar (mismo motivo que en products).
+  let precio;
+  if (req.body.price !== undefined) {
+    precio = parsePrice(req.body.price);
+    if (precio === null) return res.status(400).json({ error: PRECIO_INVALIDO });
+  }
+  ['name', 'description', 'duration', 'image', 'is_active'].forEach(f => {
     if (req.body[f] !== undefined) s[f] = req.body[f];
   });
+  if (precio !== undefined) s.price = precio;
   if (req.body.name) s.slug = slugify(req.body.name);
   s.updated_at = new Date().toISOString();
   store.persist();
@@ -217,6 +254,9 @@ router.post('/orders', rateLimit.orderLimiter(), optionalAuth, (req, res) => {
     }
 
     const total = resolved.reduce((sum, i) => sum + i.price * i.quantity, 0);
+    // Aritmetica de punto flotante binario (0.1+0.2): sin redondear, 45.55*3 deja
+    // 136.64999999999998 en orders.total, que se muestra al admin y suma en el dashboard.
+    const totalRounded = Math.round(total * 100) / 100;
     const orderNumber = `CS${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Math.floor(Math.random() * 9000 + 1000)}`;
 
     const order = {
@@ -224,7 +264,7 @@ router.post('/orders', rateLimit.orderLimiter(), optionalAuth, (req, res) => {
       user_id: req.user?.id || null,
       order_number: orderNumber,
       status: 'confirmed',
-      total,
+      total: totalRounded,
       shipping_address: shipping_address || null,
       notes: notes || null,
       customer_name, customer_email, customer_phone: customer_phone || null,
