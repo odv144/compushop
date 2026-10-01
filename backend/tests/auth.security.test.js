@@ -16,16 +16,16 @@ let customer;
 let product;
 
 before(async () => {
-  backupData();
+  await backupData();
   api = await startTestServer();
-  admin = createTestUser({ name: 'Admin Test', email: 'admin@test.com', password: 'admin123', dni: '22222222', role: 'admin' });
-  customer = createTestUser(CUSTOMER);
-  product = createTestProduct({ name: 'Producto Test Auth', price: 10000, stock: 10 });
+  admin = await createTestUser({ name: 'Admin Test', email: 'admin@test.com', password: 'admin123', dni: '22222222', role: 'admin' });
+  customer = await createTestUser(CUSTOMER);
+  product = await createTestProduct({ name: 'Producto Test Auth', price: 10000, stock: 10 });
 });
 
 after(async () => {
   if (api) await api.close();
-  restoreData();
+  await restoreData();
 });
 
 const login = async (email, password) => {
@@ -34,10 +34,12 @@ const login = async (email, password) => {
 };
 
 // corre un script node isolado (necesario para probar el fail-fast de jwt.js)
-const runNode = (script, args = [], extraEnv = {}) =>
+// `timeout` es el de `execFileSync`: sin el, un require colgado cuelga la suite.
+const runNode = (script, args = [], extraEnv = {}, timeout = 30000) =>
   execFileSync('node', ['-e', script, ...args], {
     cwd: BACKEND_ROOT,
     encoding: 'utf8',
+    timeout,
     env: { ...process.env, ...extraEnv },
   }).toString().trim();
 
@@ -169,15 +171,28 @@ describe('JWT - validacion de firma y algoritmo', () => {
 describe('POST /auth/forgot-password - dev_token', () => {
   const authCtrlPath = path.join(BACKEND_ROOT, 'src', 'controllers', 'authController.js');
 
+  /**
+   * El handler es ASYNC: busca el DNI, invalida resets previos, crea el token y
+   * consulta la config de SMTP, o sea que son varios round-trips a Postgres.
+   *
+   * Antes se resolvia con `setTimeout(..., 400)`, que era una carrera: con el
+   * store en memoria 400 ms alcanzaban, contra una base remota no. Cuando el
+   * timeout ganaba, `out` era `null`, `JSON.parse(null)` daba `null` y el test
+   * reventaba con un TypeError que no tenia nada que ver con dev_token.
+   * Ahora se espera la promesa y se imprime el resultado. Si el handler no
+   * termina, revienta el `timeout` de execFileSync, que es un sintoma claro.
+   */
   const requestForgot = (env) =>
     runNode(
       `const c=require(process.argv[1]);
        let out=null;
        const res={status(){return this;},json(p){out=p;}};
-       c.forgotPassword({body:{dni:process.argv[2]}},res);
-       setTimeout(()=>console.log(JSON.stringify(out)),400);`,
+       Promise.resolve(c.forgotPassword({body:{dni:process.argv[2]}},res))
+         .then(()=>console.log(JSON.stringify(out)))
+         .catch((e)=>{console.error(String((e&&e.stack)||e));process.exit(1);});`,
       [authCtrlPath, admin.dni],
-      env
+      env,
+      60000,
     );
 
   test('en PRODUCCION no devuelve dev_token (seria toma de cuentas)', () => {

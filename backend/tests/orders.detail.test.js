@@ -15,11 +15,20 @@
  */
 const { test, describe, before, after } = require('node:test');
 const assert = require('node:assert/strict');
-const path = require('node:path');
-const { backupData, restoreData, startTestServer, createTestProduct, createTestUser, BACKEND_ROOT, CUSTOMER } = require('./helpers');
+const {
+  backupData,
+  restoreData,
+  startTestServer,
+  createTestProduct,
+  createTestService,
+  createTestUser,
+  CUSTOMER,
+} = require('./helpers');
 
-// Mismo singleton que usa el server y que los helpers ya requirean.
-const store = require(path.join(BACKEND_ROOT, 'src', 'db', 'store.js'));
+// Este archivo miraba `store.js` porque los pedidos vivian ahi (fase 4). Ya no:
+// los pedidos, el catalogo y los usuarios estan en PostgreSQL, asi que el
+// contrato de `GET /orders/:id` se verifica contra la API y nada mas. El require
+// del store se fue con el resto.
 
 let api;
 let admin;
@@ -32,39 +41,18 @@ let richOrderId;
 // Pedido "pelado": sin telefono, sin direccion y sin notas.
 let bareOrderId;
 
-/** Crea un servicio de test en el store y devuelve su id. Mismo estilo que helpers.js. */
-function createTestService({ name, price } = {}) {
-  const db = store.get();
-  const id = store.next('services');
-  db.services.push({
-    id,
-    name,
-    slug: String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-    description: 'Servicio de test',
-    price,
-    duration: '2 horas',
-    image: null,
-    is_active: true,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  });
-  store.persist();
-  return id;
-}
-
 const login = async (email, password) => {
   const r = await api.post('/auth/login', { email, password });
   return r.body && r.body.token;
 };
 
 before(async () => {
-  backupData();
+  await backupData();
   api = await startTestServer();
-  admin = createTestUser({ name: 'Admin Detalle', email: 'admin.detalle@test.com', password: 'admin123', dni: '33333333', role: 'admin' });
-  customer = createTestUser(CUSTOMER);
-  product = createTestProduct({ name: 'Producto Detalle Test', price: 2500, stock: 50 });
-  const serviceId = createTestService({ name: 'Servicio Detalle Test', price: 8000 });
-  service = { id: serviceId, price: 8000 };
+  admin = await createTestUser({ name: 'Admin Detalle', email: 'admin.detalle@test.com', password: 'admin123', dni: '33333333', role: 'admin' });
+  customer = await createTestUser(CUSTOMER);
+  product = await createTestProduct({ name: 'Producto Detalle Test', price: 2500, stock: 50 });
+  service = await createTestService({ name: 'Servicio Detalle Test', price: 8000 });
 
   const adminToken = await login(admin.email, admin.password);
 
@@ -94,7 +82,7 @@ before(async () => {
 
 after(async () => {
   if (api) await api.close();
-  restoreData();
+  await restoreData();
 });
 
 describe('GET /orders/:id - contrato que consume la pantalla de detalle', () => {

@@ -22,10 +22,19 @@
 const { test, describe, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
-const { backupData, restoreData, startTestServer, createTestProduct, createTestUser } = require('./helpers');
+const {
+  backupData,
+  restoreData,
+  startTestServer,
+  createTestProduct,
+  createTestService,
+  createTestUser,
+} = require('./helpers');
 
-// Mismo singleton que usa el server.
-const store = require(path.join(__dirname, '..', 'src', 'db', 'store.js'));
+// La capa de datos: TODOS los precios de este archivo se leen y se escriben
+// aca. Desde la fase 4 el store JSON no participa en ninguno: ni en el CRUD del
+// catalogo, ni en el total de un pedido.
+const repo = require(path.join(__dirname, '..', 'src', 'data', 'repo.js'));
 
 let api;
 let token;
@@ -33,46 +42,39 @@ let producto;
 
 const ADMIN = { name: 'Admin Precios', email: 'admin.precios@test.com', password: 'admin123', dni: '44444444' };
 
-/** Crea un servicio en el store. Mismo estilo que createTestProduct. */
-function createTestService({ name, price } = {}) {
-  const db = store.get();
-  const id = store.next('services');
-  db.services.push({
-    id,
-    name,
-    slug: String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-    description: 'Servicio de test',
-    price,
-    duration: '2 horas',
-    image: null,
-    is_active: true,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  });
-  store.persist();
-  return { id, price };
+/**
+ * El precio COMO QUEDA en la base, leido por la capa de datos.
+ *
+ * Antes era `store.get()[collection].find(...)`. Ahora el producto vive en
+ * Postgres y el store solo tiene la copia que `POST /orders` necesita, asi que
+ * leer el store probaria la copia, no el dato. `assert.strictEqual` y no
+ * `assert.equal` a proposito: 6899.99 tiene que ser el MISMO numero, no uno que
+ * se parece.
+ */
+async function precioEnRepo(coleccion, id) {
+  const fila = await repo[coleccion].findByIdOrSlug(id);
+  assert.ok(fila, `no existe ${coleccion} ${id} para leer el precio`);
+  return Number(fila.price);
 }
-
-const precioEnStore = (collection, id) => store.get()[collection].find((x) => x.id == id).price;
 
 const auth = () => ({ token });
 
 before(async () => {
-  backupData();
+  await backupData();
   api = await startTestServer();
-  createTestUser({ ...ADMIN, role: 'admin' });
+  await createTestUser({ ...ADMIN, role: 'admin' });
   const r = await api.post('/auth/login', { email: ADMIN.email, password: ADMIN.password });
   token = r.body.token;
   assert.ok(token, 'el admin de test deberia poder loguearse');
-  producto = createTestProduct({ name: 'Producto Precios Test', price: 1000, stock: 100 });
+  producto = await createTestProduct({ name: 'Producto Precios Test', price: 1000, stock: 100 });
 });
 
 after(async () => {
   if (api) await api.close();
-  restoreData();
+  await restoreData();
 });
 
-// Precios que NO pueden entrar al store.
+// Precios que NO pueden entrar a la base.
 const INVALIDOS = [
   { label: 'string no numerico', value: 'abc' },
   { label: 'string vacio', value: '' },
@@ -85,6 +87,11 @@ const INVALIDOS = [
   { label: 'array', value: [10] },
   { label: 'NaN como texto', value: 'NaN' },
   { label: 'Infinity como texto', value: 'Infinity' },
+  // Menos de 2 decimales que NO es representable en numeric(14,2). Postgres
+  // la redondearia solo (0.0001 -> 0.0000) y el admin creeria haber guardado
+  // un precio de 0 que nunca escribio. Con la regla nueva es un 400 explicito.
+  { label: 'mas de 2 decimales', value: 45.555 },
+  { label: 'mas de 2 decimales en texto', value: '6899.999' },
 ];
 
 describe('POST /products - precio invalido', () => {
@@ -110,11 +117,13 @@ describe('POST /products - precio invalido', () => {
   });
 
   test('no crea el producto cuando el precio es invalido', async () => {
-    const before = store.get().products.length;
+    const before = await repo.products.list({ active: false, page: 1, limit: 1 });
 
     await api.post('/products', { name: 'No Debe Existir', price: 'abc' }, auth());
 
-    assert.equal(store.get().products.length, before, 'un 400 no puede dejar productos colgados en el store');
+    const after = await repo.products.list({ active: false, page: 1, limit: 1 });
+    assert.equal(after.pagination.total, before.pagination.total,
+      'un 400 no puede dejar productos colgados en la base');
   });
 });
 
@@ -124,7 +133,7 @@ describe('POST /products - precio valido', () => {
 
     assert.equal(r.status, 201);
     assert.equal(r.body.product.price, 6899.99);
-    assert.equal(precioEnStore('products', r.body.product.id), 6899.99, 'el store debe guardar el decimal tal cual');
+    assert.equal(await precioEnRepo('products', r.body.product.id), 6899.99, 'la base debe guardar el decimal tal cual');
   });
 
   test('normaliza un precio enviado como string numerico', async () => {
@@ -158,22 +167,22 @@ describe('PUT /products/:id - precio invalido', () => {
   }
 
   test('un precio rechazado NO cambia el precio guardado', async () => {
-    const original = precioEnStore('products', producto.id);
+    const original = await precioEnRepo('products', producto.id);
 
     for (const { value } of INVALIDOS) {
       await api.put(`/products/${producto.id}`, { price: value }, auth());
-      assert.equal(precioEnStore('products', producto.id), original,
-        `un PUT rechazado dejo el precio en ${precioEnStore('products', producto.id)}`);
+      assert.equal(await precioEnRepo('products', producto.id), original,
+        `un PUT rechazado dejo el precio en ${await precioEnRepo('products', producto.id)}`);
     }
   });
 
   test('un precio rechazado NO pisa otros campos antes de validar', async () => {
-    const nombreOriginal = store.get().products.find((x) => x.id == producto.id).name;
+    const nombreOriginal = (await repo.products.findByIdOrSlug(producto.id)).name;
 
     await api.put(`/products/${producto.id}`, { name: 'Nombre Que No Se Guarda', price: 'abc' }, auth());
 
-    assert.equal(store.get().products.find((x) => x.id == producto.id).name, nombreOriginal,
-      'el 400 tiene que salir antes de mutar el producto');
+    const actual = await repo.products.findByIdOrSlug(producto.id);
+    assert.equal(actual.name, nombreOriginal, 'el 400 tiene que salir antes de mutar el producto');
   });
 });
 
@@ -183,7 +192,7 @@ describe('PUT /products/:id - precio valido', () => {
 
     assert.equal(r.status, 200);
     assert.strictEqual(r.body.product.price, 6899.99);
-    assert.strictEqual(precioEnStore('products', producto.id), 6899.99, '6899.99 no puede perder Precision');
+    assert.strictEqual(await precioEnRepo('products', producto.id), 6899.99, '6899.99 no puede perder Precision');
   });
 
   test('un PUT sin price no toca el precio actual', async () => {
@@ -195,12 +204,38 @@ describe('PUT /products/:id - precio valido', () => {
     assert.strictEqual(r.body.product.price, 1234.56, 'un PUT parcial no puede borrar el precio');
   });
 
-  test('no redondea el precio unitario (el redondeo es solo del total)', async () => {
+  test('rechaza un precio con mas de 2 decimales en vez de redondear', async () => {
+    // ANTES (store JSON): este test exigia 200 y 45.555 guardado tal cual, y el
+    // comentario explicaba que el redondeo era "solo del total". Con numeric(14,2)
+    // ese contrato es imposible: Postgres redondea 45.555 -> 45.56 (banker's
+    // rounding) y el admin leeria un precio que no escribio. Ademas el item de
+    // un pedido arrastraba el tercer decimal dentro del total.
+    // Ahora la regla es maxima 2 decimales en el puerto, y el 400 es explicito.
     const r = await api.put(`/products/${producto.id}`, { price: 45.555 }, auth());
 
+    assert.equal(r.status, 400, `debio rechazar, devolvio ${r.status}`);
+    assert.match(r.body.error, /decimal/i, `mensaje inesperado: ${r.body.error}`);
+  });
+
+  test('el precio sigue intacto despues del rechazo por precision', async () => {
+    assert.strictEqual(await precioEnRepo('products', producto.id), 1234.56);
+  });
+
+  test('acepta exactamente 2 decimales (el limite es inclusivo)', async () => {
+    const r = await api.put(`/products/${producto.id}`, { price: 45.55 }, auth());
+
     assert.equal(r.status, 200);
-    assert.strictEqual(r.body.product.price, 45.555,
-      'el precio unitario se guarda tal cual lo mando el admin; el redondeo a 2 decimales es del total del pedido');
+    assert.strictEqual(await precioEnRepo('products', producto.id), 45.55);
+  });
+
+  test('un string con ceros de mas no cuenta como mas decimales', async () => {
+    // "6899.5500" tiene 4 decimales de texto pero el numero es 6899.55, y eso
+    // SI entra en numeric(14,2). Si se mirara la cadena, el admin veria un
+    // rechazo sin explicacion cuando escribio un precio perfectamente valido.
+    const r = await api.put(`/products/${producto.id}`, { price: '6899.5500' }, auth());
+
+    assert.equal(r.status, 200);
+    assert.strictEqual(await precioEnRepo('products', producto.id), 6899.55);
   });
 });
 
@@ -224,15 +259,15 @@ describe('POST /services - precio invalido y valido', () => {
 
     assert.equal(r.status, 201);
     assert.strictEqual(r.body.service.price, 89.99);
-    assert.strictEqual(precioEnStore('services', r.body.service.id), 89.99);
+    assert.strictEqual(await precioEnRepo('services', r.body.service.id), 89.99);
   });
 });
 
 describe('PUT /services/:id - precio invalido y valido', () => {
   let servicio;
 
-  before(() => {
-    servicio = createTestService({ name: 'Servicio Para Editar', price: 5000 });
+  before(async () => {
+    servicio = await createTestService({ name: 'Servicio Para Editar', price: 5000 });
   });
 
   for (const { label, value } of INVALIDOS) {
@@ -244,7 +279,7 @@ describe('PUT /services/:id - precio invalido y valido', () => {
   }
 
   test('un precio rechazado NO cambia el precio guardado', async () => {
-    assert.strictEqual(precioEnStore('services', servicio.id), 5000);
+    assert.strictEqual(await precioEnRepo('services', servicio.id), 5000);
   });
 
   test('guarda 6899.99 exacto', async () => {
@@ -252,7 +287,7 @@ describe('PUT /services/:id - precio invalido y valido', () => {
 
     assert.equal(r.status, 200);
     assert.strictEqual(r.body.service.price, 6899.99);
-    assert.strictEqual(precioEnStore('services', servicio.id), 6899.99);
+    assert.strictEqual(await precioEnRepo('services', servicio.id), 6899.99);
   });
 
   test('un PUT parcial no toca el precio', async () => {
@@ -260,6 +295,7 @@ describe('PUT /services/:id - precio invalido y valido', () => {
 
     assert.equal(r.status, 200);
     assert.strictEqual(r.body.service.price, 6899.99);
+    assert.strictEqual(await precioEnRepo('services', servicio.id), 6899.99);
   });
 });
 
@@ -268,13 +304,18 @@ describe('POST /orders - el total no arrastra basura flotante', () => {
   // Sin redondear, orders.total guardaba 137.51999999999998.
   let A;
   let B;
+  let S;
 
   // OJO: los createTestProduct van en un before y no en el cuerpo del describe.
   // El cuerpo se evalua al cargar el archivo, antes de que corra el backupData()
   // global: un producto creado ahi queda en el backup y sobrevive al restore.
-  before(() => {
-    A = createTestProduct({ name: 'Flotante A', price: 45.55, stock: 100 });
-    B = createTestProduct({ name: 'Flotante B', price: 0.29, stock: 100 });
+  before(async () => {
+    A = await createTestProduct({ name: 'Flotante A', price: 45.55, stock: 100 });
+    B = await createTestProduct({ name: 'Flotante B', price: 0.29, stock: 100 });
+    // El precio de un SERVICIO viaja por el mismo mapper que el de un producto
+    // (`resolveForOrder` los resuelve con el mismo tipo de fila), asi que si uno
+    // vuelve como string, el otro tambien.
+    S = await createTestService({ name: 'Servicio Tipos', price: 12.34, duration: '1 dia' });
   });
 
   const pedido = () =>
@@ -312,9 +353,12 @@ describe('POST /orders - el total no arrastra basura flotante', () => {
     }
   });
 
-  test('el total persistido en el store tambien viene limpio', async () => {
+  test('el total persistido en la base tambien viene limpio', async () => {
     const r = await pedido();
-    const guardado = store.get().orders.find((o) => o.id === r.body.order.id);
+    // Se relee de la BASE y no de la respuesta: el 201 arma el objeto con el
+    // `returning` del INSERT, y un total feo podria venir justo de ahi. Lo que
+    // importa es lo que quedo guardado, que es lo que despues suma el dashboard.
+    const guardado = await repo.orders.findById(r.body.order.id);
 
     assert.strictEqual(guardado.total, 137.52, 'lo que se guarda es lo que se muestra al admin');
     assert.strictEqual(guardado.total, Math.round(guardado.total * 100) / 100);
@@ -349,5 +393,36 @@ describe('POST /orders - el total no arrastra basura flotante', () => {
 
     assert.equal(typeof r.body.stats.revenue, 'number');
     assert.ok(Number.isFinite(r.body.stats.revenue), 'los ingresos no pueden ser NaN');
+  });
+
+  // Tarea 5.10. Este es el UNICO lugar donde se verifica el tipo en la frontera
+  // HTTP, y hace falta por una razon concreta: `assert.equal` de node es laxo
+  // (`==`), asi que `assert.equal(total, 137.52)` TAMBIEN pasa con total === '137.52'.
+  // Todos los asserts de precio de este archivo son laxos, y por eso el tipo se
+  // tiene que comprobar aparte y explicitamente.
+  //
+  // El bug que atrapa: `numeric` (oid 1700) llega como STRING si el typeParser de
+  // `pool.js` no esta. No revienta nada: el front lo multiplica bien, los tests
+  // laxos siguen verdes, y el unico sintoma es que `formatPrice` recibe texto y
+  // un `.toFixed` en algun lado del front termina rompiendose en produccion.
+  test('la API devuelve NUMEROS, no strings, en todos los precios', async () => {
+    const prod = await api.get(`/products/${A.id}`);
+    assert.strictEqual(typeof prod.body.product.price, 'number', `precio de producto: ${typeof prod.body.product.price}`);
+    assert.strictEqual(typeof prod.body.product.stock, 'number', `stock de producto: ${typeof prod.body.product.stock}`);
+
+    const srv = await api.get(`/services/${S.id}`);
+    assert.strictEqual(typeof srv.body.service.price, 'number', `precio de servicio: ${typeof srv.body.service.price}`);
+
+    const r = await pedido();
+    assert.strictEqual(typeof r.body.order.total, 'number', `total del pedido: ${typeof r.body.order.total}`);
+    for (const i of r.body.order.items) {
+      assert.strictEqual(typeof i.price, 'number', `precio del item: ${typeof i.price}`);
+      assert.strictEqual(typeof i.quantity, 'number', `cantidad del item: ${typeof i.quantity}`);
+    }
+
+    // Y el enganche al store: un POST followed de un GET tiene que devolver el
+    // mismo tipo, porque el mismo mapper pasa por las dos.
+    const detalle = await api.get(`/orders/${r.body.order.id}`, { token: auth().token });
+    assert.strictEqual(typeof detalle.body.order.total, 'number', `total en el detalle: ${typeof detalle.body.order.total}`);
   });
 });

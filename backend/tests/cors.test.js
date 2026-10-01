@@ -155,13 +155,13 @@ describe('Integracion: el server aplica el allowlist de verdad', () => {
     fetch(`${api.origin}/api/products`, { headers: origin ? { Origin: origin } : {} });
 
   before(async () => {
-    backupData();
+    await backupData();
     api = await startTestServer();
   });
 
   after(async () => {
     if (api) await api.close();
-    restoreData();
+    await restoreData();
   });
 
   test('un origen permitido responde 200', async () => {

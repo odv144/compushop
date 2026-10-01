@@ -9,20 +9,21 @@
  */
 const { test, describe, before, after } = require('node:test');
 const assert = require('node:assert/strict');
+const path = require('node:path');
 const { backupData, restoreData, startTestServer, createTestProduct } = require('./helpers');
 
 let api;
 let product;
 
 before(async () => {
-  backupData();
+  await backupData();
   api = await startTestServer();
-  product = createTestProduct({ name: 'Notebook Test Carissima', price: 689999, stock: 50 });
+  product = await createTestProduct({ name: 'Notebook Test Carissima', price: 689999, stock: 50 });
 });
 
 after(async () => {
   if (api) await api.close();
-  restoreData();
+  await restoreData();
 });
 
 const order = (items) =>
@@ -33,15 +34,36 @@ const order = (items) =>
     shipping_address: 'Av. Falsa 123',
   });
 
-const stockOf = (id) =>
-  api.get(`/products/${id}`).then((r) => r.body.product.stock);
+/**
+ * Stock segun la capa que DESCUENTA: `repo.products`, o sea PostgreSQL.
+ * ==============================================================================
+ * D-I quedo CERRADO con la fase 4: `POST /orders` resuelve y descuenta contra
+ * la misma base que el resto de la app, asi que el stock que baja es el de la
+ * fila de Postgres.
+ *
+ * Por eso esto puede volver a ser `GET /products/:id`: antes NO podia, porque
+ * esa ruta leia Postgres mientras el pedido escribia en el store, y el test
+ * 'descuenta exactamente la cantidad comprada' pasaba sin comprobar nada (el
+ * peor tipo de test verde: uno que mide la capa equivocada y por eso no puede
+ * fallar). Hoy las dos capas son la misma, asi que la lectura tiene que ver el
+ * descuento de verdad.
+ *
+ * Se lee por el REPO y no por la ruta HTTP a proposito: si el repo y la ruta
+ * disagreearan, el test tiene que notar CUAL de los dos esta mal.
+ */
+const stockOf = async (id) => {
+  const repo = require(path.join(__dirname, '..', 'src', 'data', 'repo.js'));
+  const fila = await repo.products.findByIdOrSlug(id);
+  assert.ok(fila, `el fixture ${id} deberia existir en Postgres`);
+  return fila.stock;
+};
 
 describe('POST /orders - precios controlados por el cliente', () => {
   test('ignora el price del body y cobra el precio real de la DB', async () => {
     const r = await order([{ id: product.id, type: 'product', name: 'CUALQUIER COSA', price: 1, quantity: 1 }]);
 
     assert.equal(r.status, 201, 'el pedido deberia aceptarse');
-    assert.equal(r.body.order.total, 689999, 'el total DEBE salir del store, no del body');
+    assert.equal(r.body.order.total, 689999, 'el total DEBE salir de la capa de datos, no del body');
   });
 
   test('ignora el name del body y usa el nombre real', async () => {
@@ -116,7 +138,7 @@ describe('POST /orders - existencia y stock', () => {
   });
 
   test('rechaza un producto inactivo aunque el body diga price=0', async () => {
-    const inactivo = createTestProduct({ name: 'Producto Retirado', price: 99999, stock: 10, is_active: false });
+    const inactivo = await createTestProduct({ name: 'Producto Retirado', price: 99999, stock: 10, is_active: false });
 
     const r = await order([{ id: inactivo.id, type: 'product', name: 'x', price: 0, quantity: 1 }]);
 
@@ -142,7 +164,7 @@ describe('POST /orders - existencia y stock', () => {
   // descontar, en un loop separado del que hacia el descuento. Mandar el mismo
   // producto dos veces pasaba los dos checks y dejaba el stock en negativo.
   test('el MISMO producto dos veces no puede dejar el stock en negativo', async () => {
-    const scarce = createTestProduct({ name: 'Stock Escaso', price: 1000, stock: 1 });
+    const scarce = await createTestProduct({ name: 'Stock Escaso', price: 1000, stock: 1 });
 
     const r = await order([
       { id: scarce.id, type: 'product', quantity: 1 },
@@ -154,7 +176,7 @@ describe('POST /orders - existencia y stock', () => {
   });
 
   test('cantidades agregadas del mismo producto se suman para validar stock', async () => {
-    const scarce = createTestProduct({ name: 'Stock Escaso Dos', price: 1000, stock: 3 });
+    const scarce = await createTestProduct({ name: 'Stock Escaso Dos', price: 1000, stock: 3 });
 
     const r = await order([
       { id: scarce.id, type: 'product', quantity: 2 },
@@ -166,7 +188,7 @@ describe('POST /orders - existencia y stock', () => {
   });
 
   test('el agregado no rompe el caso valido: mismo producto 2 veces con stock suficiente', async () => {
-    const ok = createTestProduct({ name: 'Stock Suficiente', price: 1000, stock: 10 });
+    const ok = await createTestProduct({ name: 'Stock Suficiente', price: 1000, stock: 10 });
 
     const r = await order([
       { id: ok.id, type: 'product', quantity: 2 },
@@ -181,7 +203,7 @@ describe('POST /orders - existencia y stock', () => {
 });
 
 describe('POST /orders - servicios', () => {
-  test('un servicio se resuelve por el store, no por el body', async () => {
+  test('un servicio se resuelve por id de la base, no por el body', async () => {
     const services = await api.get('/services?active=all');
     const svc = services.body.services[0];
     const realPrice = svc.price;
@@ -189,7 +211,7 @@ describe('POST /orders - servicios', () => {
     const r = await order([{ id: svc.id, type: 'service', name: 'Servicio Inventado', price: 0, quantity: 1 }]);
 
     assert.equal(r.status, 201);
-    assert.equal(r.body.order.items[0].price, realPrice, 'el precio del servicio sale del store');
+    assert.equal(r.body.order.items[0].price, realPrice, 'el precio del servicio sale de la base');
   });
 
   test('un servicio inexistente es rechazado', async () => {
