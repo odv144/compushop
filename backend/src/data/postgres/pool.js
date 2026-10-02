@@ -45,11 +45,28 @@ if (!connectionString) {
   );
 }
 
-const ca = process.env.SUPABASE_CA_CERT;
+// Normalizacion del PEM. Localmente `dotenv` parsea el .env y expande los
+// `\n` de un valor entre comillas dobles, asi que la CA llega con newlines
+// reales. En Vercel NO: las env vars se leen crudas de process.env y nunca
+// pasan por dotenv, asi que un valor copiado de .env.example llega como una
+// unica linea con `\n` literales y `pg` rechaza el certificado. Depender de
+// COMO se cargo la variable hacia que el deploy funcione o no, asi que se
+// normaliza aca y las dos vias dan exactamente lo mismo.
+const rawCa = process.env.SUPABASE_CA_CERT;
+const ca = rawCa ? String(rawCa).replace(/\\n/g, '\n').trim() : undefined;
 const isProd = process.env.NODE_ENV === 'production' || !!process.env.VERCEL;
 
 let ssl;
 if (ca) {
+  // Fallar temprano y con un mensaje util. Sin esto el error real aparece
+  // adentro de pg/TLS en el primer query, como un fallo de conexion que no
+  // dice nada de la CA.
+  if (!/-----BEGIN CERTIFICATE-----[\s\S]+-----END CERTIFICATE-----/.test(ca)) {
+    throw new Error(
+      'SUPABASE_CA_CERT no parece un PEM valido (faltan los marcadores BEGIN/END ' +
+      'o el cuerpo base64 esta incompleto). Revisala en el dashboard de Vercel.'
+    );
+  }
   ssl = { ca, rejectUnauthorized: true };
 } else if (isProd) {
   throw new Error(
