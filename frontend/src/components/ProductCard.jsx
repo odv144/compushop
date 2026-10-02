@@ -3,9 +3,7 @@ import {
 } from '@chakra-ui/react';
 import { Link as RouterLink } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
-
-const formatPrice = (n) =>
-  new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n);
+import { formatPrice } from '../utils/format';
 
 export default function ProductCard({ product, type = 'product' }) {
   const { addItem } = useCart();

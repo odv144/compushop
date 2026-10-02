@@ -17,6 +17,11 @@ build/
 
 # Data local
 **/data.json
+# Backups que hace scripts/migrate-data.js antes de escribir. `**/data.json` NO
+# los cubre: el patron exige el nombre exacto. Sin esta linea los backups con
+# PII (nombre, email, telefono, direccion) quedan untracked y un `git add -A`
+# los sube al repo.
+**/data.json.bak-*
 **/*.db
 **/uploads/
 

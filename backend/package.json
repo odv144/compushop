@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "seed": "node src/db/seed.js"
+    "seed": "node src/db/seed.js",
+    "test": "node --test --test-concurrency=1 \"tests/*.test.js\"",
+    "test:reset": "node scripts/reset-test-db.js"
   },
   "keywords": [
     "ecommerce",
@@ -20,9 +22,10 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "express-rate-limit": "^8.7.0",
     "jsonwebtoken": "^9.0.2",
     "nodemailer": "^10.0.13",
-    "sql.js": "^1.12.0",
+    "pg": "^8.23.1",
     "uuid": "^11.0.3"
   }
 }

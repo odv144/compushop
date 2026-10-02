@@ -6,10 +6,9 @@ import {
 } from '@chakra-ui/react';
 import { FiPlus, FiEdit, FiTrash2 } from 'react-icons/fi';
 import api from '../../api/client';
+import { formatPrice } from '../../utils/format';
 
-const formatPrice = (n) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n);
-
-const empty = { name: '', description: '', price: 0, stock: 0, category_id: '', brand: '', image: '', is_active: true };
+const empty = { name: '', description: '', price: '', stock: 0, category_id: '', brand: '', image: '', is_active: true };
 
 export default function AdminProducts() {
   const [products, setProducts] = useState([]);
@@ -42,8 +41,17 @@ export default function AdminProducts() {
   };
 
   const save = async () => {
+    // Number('') === 0: sin esta guarda, borrar el campo guardaba el producto
+    // en $0 con un toast verde. isRequired de Chakra es solo visual y el boton
+    // es onClick, no submit: nada impedia seguir adelante.
+    const precio = Number(form.price);
+    const vacio = form.price === '' || form.price === null || form.price === undefined;
+    if (vacio || !Number.isFinite(precio) || precio < 0) {
+      toast({ title: 'Revisá el precio', description: 'Ingresá un número mayor o igual a 0.', status: 'error' });
+      return;
+    }
     try {
-      const payload = { ...form, price: Number(form.price), stock: Number(form.stock), category_id: form.category_id ? Number(form.category_id) : null };
+      const payload = { ...form, price: precio, stock: Number(form.stock), category_id: form.category_id ? Number(form.category_id) : null };
       if (editId) await api.put(`/products/${editId}`, payload);
       else await api.post('/products', payload);
       toast({ title: editId ? 'Actualizado' : 'Creado', status: 'success' });
@@ -99,7 +107,23 @@ export default function AdminProducts() {
             <FormControl mb={3} isRequired><FormLabel>Nombre</FormLabel><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></FormControl>
             <FormControl mb={3}><FormLabel>Descripción</FormLabel><Textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></FormControl>
             <HStack mb={3}>
-              <FormControl isRequired><FormLabel>Precio</FormLabel><NumberInput value={form.price} onChange={v => setForm({ ...form, price: v })}><NumberInputField /></NumberInput></FormControl>
+              <FormControl isRequired><FormLabel>Precio</FormLabel>
+                <NumberInput
+                  value={form.price}
+                  onChange={(v, num) => setForm({ ...form, price: num === undefined || Number.isNaN(num) ? v : num })}
+                  precision={2}
+                  step={0.01}
+                  min={0}
+                  pattern="[0-9]*([.,][0-9]+)?"
+                  // Chakra borra la coma: sanitize() filtra por /^[Ee0-9+\-.]$/ y
+                  // onKeyDown la bloquea antes de escribirla. Sin estas dos piezas,
+                  // un admin que escribe 6899,99 guardaba 689999 (precio x100).
+                  isValidCharacter={(c) => /[0-9.,-]/.test(c)}
+                  parse={(v) => String(v).replace(',', '.')}
+                >
+                  <NumberInputField placeholder="0,00" />
+                </NumberInput>
+              </FormControl>
               <FormControl><FormLabel>Stock</FormLabel><NumberInput value={form.stock} onChange={v => setForm({ ...form, stock: v })}><NumberInputField /></NumberInput></FormControl>
             </HStack>
             <FormControl mb={3}><FormLabel>Categoría</FormLabel>

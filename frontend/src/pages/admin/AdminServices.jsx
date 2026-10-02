@@ -6,9 +6,9 @@ import {
 } from '@chakra-ui/react';
 import { FiPlus, FiEdit, FiTrash2 } from 'react-icons/fi';
 import api from '../../api/client';
+import { formatPrice } from '../../utils/format';
 
-const formatPrice = (n) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n);
-const empty = { name: '', description: '', price: 0, duration: '', image: '', is_active: true };
+const empty = { name: '', description: '', price: '', duration: '', image: '', is_active: true };
 
 export default function AdminServices() {
   const [list, setList] = useState([]);
@@ -29,8 +29,16 @@ export default function AdminServices() {
   const openEdit = (s) => { setEditId(s.id); setForm({ name: s.name, description: s.description || '', price: s.price, duration: s.duration || '', image: s.image || '', is_active: s.is_active }); onOpen(); };
 
   const save = async () => {
+    // Number('') === 0: sin esta guarda, borrar el campo guardaba el servicio
+    // en $0 con un toast verde.
+    const precio = Number(form.price);
+    const vacio = form.price === '' || form.price === null || form.price === undefined;
+    if (vacio || !Number.isFinite(precio) || precio < 0) {
+      toast({ title: 'Revisá el precio', description: 'Ingresá un número mayor o igual a 0.', status: 'error' });
+      return;
+    }
     try {
-      const payload = { ...form, price: Number(form.price) };
+      const payload = { ...form, price: precio };
       if (editId) await api.put(`/services/${editId}`, payload);
       else await api.post('/services', payload);
       toast({ title: 'Guardado', status: 'success' });
@@ -82,7 +90,23 @@ export default function AdminServices() {
           <ModalBody>
             <FormControl mb={3} isRequired><FormLabel>Nombre</FormLabel><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></FormControl>
             <FormControl mb={3}><FormLabel>Descripción</FormLabel><Textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></FormControl>
-            <FormControl mb={3} isRequired><FormLabel>Precio</FormLabel><NumberInput value={form.price} onChange={v => setForm({ ...form, price: v })}><NumberInputField /></NumberInput></FormControl>
+            <FormControl mb={3} isRequired><FormLabel>Precio</FormLabel>
+              <NumberInput
+                value={form.price}
+                onChange={(v, num) => setForm({ ...form, price: num === undefined || Number.isNaN(num) ? v : num })}
+                precision={2}
+                step={0.01}
+                min={0}
+                pattern="[0-9]*([.,][0-9]+)?"
+                // Chakra borra la coma: sanitize() filtra por /^[Ee0-9+\-.]$/ y
+                // onKeyDown la bloquea antes de escribirla. Sin estas dos piezas,
+                // un admin que escribe 6899,99 guardaba 689999 (precio x100).
+                isValidCharacter={(c) => /[0-9.,-]/.test(c)}
+                parse={(v) => String(v).replace(',', '.')}
+              >
+                <NumberInputField placeholder="0,00" />
+              </NumberInput>
+            </FormControl>
             <FormControl mb={3}><FormLabel>Duración</FormLabel><Input value={form.duration} onChange={e => setForm({ ...form, duration: e.target.value })} /></FormControl>
             <FormControl mb={3}><FormLabel>URL imagen</FormLabel><Input value={form.image} onChange={e => setForm({ ...form, image: e.target.value })} /></FormControl>
             <FormControl display="flex" alignItems="center"><FormLabel mb={0}>Activo</FormLabel><Switch isChecked={form.is_active} onChange={e => setForm({ ...form, is_active: e.target.checked })} /></FormControl>
