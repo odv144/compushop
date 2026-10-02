@@ -253,3 +253,107 @@ test('META: los guards de arquitectura detectan sus propios fallos', () => {
   assert.deepEqual(conStoreImportado(sucio), ['utils/email.js'],
     'GUARD ROTO: no detecto el store colado en utils/email.js');
 });
+
+
+test('META: el guard de orden keep-warm vs limiter detecta las tres regresiones', () => {
+  // El predicado de orden vive en tests/middleware-order.js, NO duplicado aca:
+  // con dos copias, el selftest puede pasar probando una que el guard real no
+  // usa. Se exige que architecture.test.js lo requiera, asi que el acoplamiento
+  // entre "el guard" y "lo que el selftest prueba" no se puede romper en silencio.
+  const { analizar, ordenKeepWarmValido, MOUNT, LIMITER, mountDespuesDelLimiter, mountDentroDeIf, limiterSinGuard } =
+    require('./middleware-order');
+
+  const guardSrc = read(path.join(BACKEND_ROOT, 'tests', 'architecture.test.js'));
+  assert.ok(
+    guardSrc.includes("require('./middleware-order')"),
+    'acoplamiento roto: architecture.test.js dejo de usar el predicado compartido',
+  );
+  const modSrc = read(path.join(BACKEND_ROOT, 'tests', 'middleware-order.js'));
+  for (const patron of [MOUNT, LIMITER]) {
+    assert.ok(modSrc.includes(patron), `el predicado compartido dejo de usar el patron ${patron}`);
+  }
+
+  const index = read(path.join(BACKEND_ROOT, 'src', 'index.js'));
+
+  // Control: el archivo real cumple las cinco reglas.
+  assert.equal(ordenKeepWarmValido(index), true, 'control: el orden real es correcto');
+  const a = analizar(index);
+  assert.equal(a.profundidadMount, 0, 'control: el montaje real es incondicional');
+  assert.ok(a.limiterGuardadoPorIsTest, 'control: el limiter real sigue guardado por isTest');
+
+  // Cada mutacion tiene que (a) aplicar de verdad y (b) romper el predicado.
+  // El `notEqual` contra el original es lo que evita el falso "el guard funciona":
+  // un mutador que no encuentra la forma devuelve el fuente sin tocar y pasaria
+  // por deteccion si no se comprobara.
+  const casos = [
+    {
+      nombre: 'M1 keep-warm despues del limiter',
+      mutado: mountDespuesDelLimiter(index),
+    },
+    {
+      nombre: 'M2 keep-warm montado dentro de un if (el bug original)',
+      mutado: mountDentroDeIf(index),
+    },
+    {
+      nombre: 'M3 limiter registrado sin el guard de isTest',
+      mutado: limiterSinGuard(index),
+    },
+  ];
+
+  for (const { nombre, mutado } of casos) {
+    assert.notEqual(mutado, index, `el mutador ${nombre} no aplico`);
+    assert.equal(ordenKeepWarmValido(mutado), false, `GUARD ROTO: no detecto ${nombre}`);
+  }
+});
+
+
+test('META: cada guard de keep-warm falla por SU regla y no por una ajena', () => {
+  // El selftest de arriba prueba que el predicado COMPUESTO se rompe, que es lo
+  // unico que importa para no dejar pasar el bug. No alcanza: un predicado
+  // compuesto puede romperse siempre por el mismo motivo y aun asi cada test
+  // individual mentir sobre QUE se rompio.
+  //
+  // Eso era exactamente lo que pasaba. `limiterGuardadoPorIsTest` se calculaba
+  // con `src.slice(mount, limiter)`, o sea que exigia que el `if (!isTest)`
+  // estuviera ENTRE el montaje y el limitador. Con el orden invertido (M1) el
+  // `slice` salia vacio, el flag daba false, y el test "el limitador sigue
+  // siendo condicional a NODE_ENV=test" fallaba anunciando esa regla. Pero el
+  // limitador SEGUIA dentro del `if` que lo protege: la regla no se habia roto,
+  // solo el orden. El rojo apuntando a la regla equivocada manda al que lo lee
+  // a cambiar la condicion del limitador, que es justo lo que no hay que tocar.
+  //
+  // Aca cada mutacion tiene que romper SU regla y dejar las otras dos en verde.
+  // Una regla que se rompe de mas no es conservatism: es diagnostico incorrecto.
+  const { analizar, mountDespuesDelLimiter, mountDentroDeIf, limiterSinGuard } =
+    require('./middleware-order');
+  const read = (p) => require('fs').readFileSync(p, 'utf8');
+  const index = read(path.join(BACKEND_ROOT, 'src', 'index.js'));
+  const base = analizar(index);
+  assert.equal(base.mount < base.limiter, true, 'control: el orden real es correcto');
+  assert.equal(base.profundidadMount, 0, 'control: el montaje real es incondicional');
+  assert.equal(base.limiterGuardadoPorIsTest, true, 'control: el limiter real sigue guardado');
+
+  const R = (a) => ({ orden: a.mount < a.limiter, incondicional: a.profundidadMount === 0, guardado: a.limiterGuardadoPorIsTest });
+  const espera = {
+    'M1 keep-warm despues del limiter': { orden: false, incondicional: true, guardado: true },
+    'M2 keep-warm dentro de un if': { orden: true, incondicional: false, guardado: true },
+    'M3 limiter sin el guard de isTest': { orden: true, incondicional: true, guardado: false },
+  };
+  const mutaciones = {
+    'M1 keep-warm despues del limiter': mountDespuesDelLimiter(index),
+    'M2 keep-warm dentro de un if': mountDentroDeIf(index),
+    'M3 limiter sin el guard de isTest': limiterSinGuard(index),
+  };
+
+  for (const [nombre, quiero] of Object.entries(espera)) {
+    const a = R(analizar(mutaciones[nombre]));
+    for (const [regla, valor] of Object.entries(quiero)) {
+      assert.equal(
+        a[regla],
+        valor,
+        `${nombre}: la regla "${regla}" deberia dar ${valor} y dio ${a[regla]}. ` +
+        `O se rompio una regla que no deberia, o el guard que la mide no mide eso.`,
+      );
+    }
+  }
+});

@@ -8,7 +8,7 @@ const { test, describe, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const { backupData, restoreData, startTestServer, createTestProduct, createTestUser, BACKEND_ROOT, CUSTOMER } = require('./helpers');
+const { backupData, restoreData, startTestServer, createTestProduct, createTestUser, BACKEND_ROOT, CUSTOMER, testEmail, testDni } = require('./helpers');
 
 let api;
 let admin;
@@ -18,7 +18,12 @@ let product;
 before(async () => {
   await backupData();
   api = await startTestServer();
-  admin = await createTestUser({ name: 'Admin Test', email: 'admin@test.com', password: 'admin123', dni: '22222222', role: 'admin' });
+  // Email y DNI unicos por corrida: con el fixture fijo, una corrida
+  // interrumpida dejaba un `admin@test.com` mas y `findByEmail` (order by id
+  // limit 1) autenticaba el de la corrida VIEJA. El guard de auto-borrado
+  // comparaba `params.id` contra el id del token y daba falso, asi que el admin
+  // se borraba a si mismo y el test daba verde. Ver helpers.testEmail.
+  admin = await createTestUser({ name: 'Admin Test', email: testEmail('admin'), password: 'admin123', dni: testDni('22222222'), role: 'admin' });
   customer = await createTestUser(CUSTOMER);
   product = await createTestProduct({ name: 'Producto Test Auth', price: 10000, stock: 10 });
 });
@@ -51,6 +56,31 @@ describe('POST /auth/login', () => {
     assert.ok(r.body.token, 'debe devolver token');
     assert.equal(r.body.user.email, CUSTOMER.email);
     assert.equal(r.body.user.password, undefined, 'NUNCA devolver el hash');
+  });
+
+  /**
+   * El guard DIRECTO contra la contaminacion de `users`.
+   *
+   * `findByEmail` resuelve con `order by id limit 1` y `users.email` NO tiene
+   * restriccion UNIQUE (schema.sql:60 es un indice no unico, a proposito). Con
+   * dos filas de igual email, el login devuelve la de id MAS BAJO, que es la de
+   * una corrida anterior. El resto de la suite seguia dando verde igual: el
+   * password era el mismo, el rol era el mismo, el token era valido. Lo unico
+   * que se rompia era el `id`, y solo lo comparaba el guard de auto-borrado.
+   *
+   * Por eso el assert es sobre el `id` y no sobre el email: el email con dos
+   * filas es indistinguible, el id no.
+   */
+  test('el login resuelve el MISMO id que creo el fixture (sin filas duplicadas)', async () => {
+    for (const u of [admin, customer]) {
+      const r = await api.post('/auth/login', { email: u.email, password: u.password });
+      assert.equal(r.status, 200, `login de ${u.email} fallo`);
+      assert.equal(
+        r.body.user.id,
+        u.id,
+        `findByEmail devolvio otra fila con el email ${u.email}: hay usuarios duplicados en la base de test`,
+      );
+    }
   });
 
   test('password incorrecta da 401 y no revela si el usuario existe', async () => {

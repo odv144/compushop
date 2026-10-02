@@ -157,6 +157,155 @@ async function adminClient() {
   return c;
 }
 
+// ===========================================================================
+// IDENTIDAD DE LOS FIXTURES: UNICA POR CORRIDA
+// ===========================================================================
+// Los fixtures de usuario usaban emails FIJOS (`cliente@test.com`,
+// `admin@test.com`, ...). Con `users` sin restriccion UNIQUE sobre `email`
+// (a proposito: el indice no es unico, ver schema.sql:60), dos corridas del
+// mismo archivo dejan dos filas con el mismo email. Y `findByEmail` resuelve
+// con `order by id limit 1`, o sea que devuelve SIEMPRE la de la corrida vieja:
+//
+//   - el login de los tests autenticaba a un usuario de una corrida anterior;
+//   - el guard de auto-borrado compara `parseInt(params.id) === req.user.id`, y
+//     con la fila equivocada la comparacion da falso: el admin SI se borraba a
+//     si mismo y el test que deberia detectarlo daba verde.
+//
+// O sea que el fixture fijo no hacia la suite inestable: la hacia MENTIROSA.
+// Un email por corrida elimina la ambiguedad entera, porque no hay dos filas
+// que puedan coincidir.
+//
+// No alcanza SOLO con esto. Una corrida interrumpida (Ctrl-C, OOM, `kill -9`)
+// deja las filas y `restoreData` no corre, asi que la basura se congela en el
+// snapshot de la corrida siguiente y se reproduce para siempre. Por eso el
+// `backupData` de mas abajo tambien las borra. Ver `limpiarFixturesColgados`.
+const RUN_TAG = `${process.pid.toString(36)}${Date.now().toString(36)}`;
+let fixtureSeq = 0;
+
+/**
+ * Dominio reservado por RFC 2606: nunca routable, nunca resuelve. Se usa como
+ * MARCA para poder reconocer un fixture propio y borrar solo esos, sin tocar los
+ * usuarios del seed.
+ */
+const DOMINIO_FIXTURE = 'test.invalid';
+
+/** Email de fixture unico por corrida. `testEmail('admin')` -> `admin.r<tag>.0.test.invalid`. */
+function testEmail(base) {
+  return `${base}.r${RUN_TAG}.${fixtureSeq++}@${DOMINIO_FIXTURE}`;
+}
+
+/** DNI de fixture unico por corrida. `dni` es `text` (schema.sql:51), no hay formato que respetar. */
+function testDni(base) {
+  return `${base}.r${RUN_TAG}.${fixtureSeq++}`;
+}
+
+/**
+ * ===========================================================================
+ * POR QUE `backupData` BORRA LOS FIXTURES COLGADOS
+ * ===========================================================================
+ * Es el agujero que `restoreData` no puede cerrar: si el proceso muere, el
+ * `after` no corre, y la corrida siguiente arranca con `backupData` respaldando
+ * una base que YA tiene basura. A partir de ahi el snapshot es la basura y cada
+ * restore la reproduce. Un email unico por corrida vuelve esas filas inertes
+ * (ningun fixture las busca), pero no las borra: se acumulan para siempre.
+ *
+ * Por eso se limpian ACA y no en un paso manual. Es deterministico: se borran
+ * SOLO filas cuyo email termina en el dominio de fixture, o sea que ningun
+ * usuario del seed ni ninguna fila de una app real se tocan. Y se loguea
+ * cuantas eran, para que la limpieza no sea invisible.
+ *
+ * NO se usa `on delete cascade` ni se inventan cascadas: `orders.user_id` esta
+ * declarado `on delete set null` y borrarlo a mano dejaria pedidos huerfanos sin
+ * avisar. Se borran los usuarios de fixture y los pedidos que apuntan a ellos se
+ * quedan con `user_id = null`, que es lo que el schema ya dice que pase. Los
+ * pedidos huerfanos NO se borran: no hay forma de distinguirlos de los del seed
+ * por una columna, y borrar a ciegas seria peor.
+ */
+async function limpiarFixturesColgados(admin) {
+  const r = await admin.query(
+    `delete from users where email like $1 returning id`,
+    [`%@${DOMINIO_FIXTURE}`],
+  );
+  if (r.rowCount > 0) {
+    console.warn(
+      `[helpers] ${r.rowCount} usuario(s) de fixture de una corrida anterior (email %@${DOMINIO_FIXTURE}) ` +
+      `borrados antes del snapshot. Si esto aparece en cada corrida, hay una corrida que se esta ` +
+      `interrumpiendo y no completa el after.`,
+    );
+  }
+
+  // Duplicados que NO son fixtures: los de los fixtures de email FIJO que
+  // existian antes de que los emails fueran unicos por corrida. No se borran
+  // (no se puede saber cual de los dos es el bueno, y borrar el equivocado
+  // rompe cosas), pero se AVISA.
+  //
+  // Es un warning y no un assert a proposito: con los fixtures de ahora ninguna
+  // busqueda cae en un duplicado asi, asi que la suite sigue siendo correcta y
+  // un fallo aca seria ruido, no un bug. Lo que no se permite es que la
+  // duplicacion siga sin que nadie se entere.
+  const dups = await admin.query(
+    `select email, count(*)::int as veces, array_agg(id order by id) as ids
+       from users
+      group by email
+     having count(*) > 1
+        and email not like $1`,
+    [`%@${DOMINIO_FIXTURE}`],
+  );
+  if (dups.rows.length) {
+    console.warn(
+      `[helpers] ATENCION: ${dups.rows.length} email(s) con filas duplicadas que NO son fixtures. ` +
+      `No rompen la suite (los fixtures ya no usan emails fijos), pero ensucian la base:`,
+    );
+    for (const d of dups.rows) {
+      console.warn(`             ${d.email} x${d.veces} ids=${JSON.stringify(d.ids)}`);
+    }
+  }
+  return r.rowCount;
+}
+
+/**
+ * Reset explicito y SEGURO de los fixtures de la base de test.
+ *
+ * Borra SOLO los usuarios cuyo email termina en el dominio de fixture, o sea
+ * los que creo una corrida de tests. Idempotente: correrlo dos veces es lo
+ * mismo que correrlo una.
+ *
+ * ===========================================================================
+ * POR QUE NO TRUNCA LAS NUEVE TABLAS
+ * ===========================================================================
+ * Truncar todo pareceria mas completo y es peor. `TRUNCATE ... CASCADE` deja la
+ * base VACIA, incluyendo los dos usuarios del seed (`admin@compushop.com`,
+ * `juan@email.com`) y el catalogo, y esa base no se reconstruye sola: hay que
+ * correr `npm run seed` o `scripts/setup-db.js` a mano. Los `.verify.js`
+ * (`read-parity`, `data-layer`) comparan contra el seed, asi que un truncate los
+ * deja inservibles y el que lo descubre es el proximo que los corre, no el que
+ * lo hizo.
+ *
+ * Lo que este helper NO saca son los pedidos huerfanos de una corrida
+ * interrumpida: `orders` no tiene columna que los marque como fixture, asi que
+ * no se pueden distinguir de un pedido real sin borrarlos a ciegas. No afectan
+ * la determinacion de la suite (ningun test cuenta pedidos globales) pero se
+ * acumulan. Si molesta, `npm run seed` los deja como estaban.
+ *
+ * Los `password_resets` de esos usuarios caen solos: `users_password_resets_fk`
+ * ya es `on delete cascade` en el schema. No se toco el schema.
+ */
+async function resetTestDb() {
+  const admin = await adminClient();
+  try {
+    const db = await admin.query('select current_database() as db');
+    if (db.rows[0].db !== POOLER_DB) {
+      throw new Error(`resetTestDb se niega a tocar "${db.rows[0].db}": solo "${POOLER_DB}"`);
+    }
+    const r = await admin.query('delete from users where email like $1 returning id, email', [`%@${DOMINIO_FIXTURE}`]);
+    console.log(`[helpers] ${POOLER_DB}: ${r.rowCount} fixture(s) borrados.`);
+    for (const row of r.rows) console.log(`             id=${row.id} ${row.email}`);
+  } finally {
+    await admin.end();
+  }
+  dbSnapshot = null;
+}
+
 let backupPath = null;
 let dbSnapshot = null;
 
@@ -186,6 +335,10 @@ async function backupData() {
 
   const admin = await adminClient();
   try {
+    // ANTES del snapshot, para que el snapshot no se lleve la basura de una
+    // corrida que murio sin restore. Ver `limpiarFixturesColgados`.
+    await limpiarFixturesColgados(admin);
+
     const tablas = {};
     for (const t of TABLES) {
       const cols = await columnasDe(admin, t);
@@ -429,28 +582,46 @@ async function createTestService({ name, price, is_active = true } = {}) {
  * Crea un usuario de test con password hasheada. Solo en Postgres: ningun
  * endpoint lee usuarios del store, asi que la doble escritura aca seria
  * work sin destino.
+ *
+ * Devuelve `dni` ademas de lo obvio: `POST /auth/forgot-password` busca por DNI
+ * y los tests de `dev_token` pasan `admin.dni`. Con un `createTestUser` que no
+ * lo devolvia, `admin.dni` era `undefined`, el controller recibia la cadena
+ * `"undefined"`, `findByDni` no encontraba a nadie y contestaba la respuesta
+ * generica antes de crear el token: los tres tests pasaban sin haber probado
+ * el flujo de reset.
+ *
+ * Si no se pasa `email`, se genera uno unico por corrida (ver `testEmail`).
+ * `dni` tambien, por la misma razon: `findByDni` tiene el mismo
+ * `order by id limit 1` que `findByEmail`.
  */
 async function createTestUser({ name, email, password, dni, role = 'customer' } = {}) {
   const bcrypt = require(path.join(BACKEND_ROOT, 'node_modules', 'bcryptjs'));
   const repo = require(path.join(BACKEND_ROOT, 'src', 'data', 'repo.js'));
+  const emailFinal = email || testEmail('usuario');
+  const dniFinal = dni === undefined ? testDni('00000000') : dni;
   const user = await repo.users.create({
     name,
-    email,
+    email: emailFinal,
     password: bcrypt.hashSync(password, 10),
-    dni: dni || null,
+    dni: dniFinal,
     role,
   });
-  return { id: user.id, email, password, role };
+  return { id: user.id, name, email: emailFinal, password, dni: dniFinal, role };
 }
 
-const CUSTOMER = { name: 'Cliente Test', email: 'cliente@test.com', password: 'test123', dni: '11111111' };
+const CUSTOMER = { name: 'Cliente Test', email: testEmail('cliente'), password: 'test123', dni: testDni('11111111') };
 
 module.exports = {
   BACKEND_ROOT,
   DATA_PATH,
   POOLER_DB,
+  RUN_TAG,
+  DOMINIO_FIXTURE,
+  testEmail,
+  testDni,
   backupData,
   restoreData,
+  resetTestDb,
   startTestServer,
   createTestProduct,
   createTestService,

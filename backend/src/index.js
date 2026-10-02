@@ -49,11 +49,38 @@ app.use(cors({
   credentials: true,
 }));
 
-// Red de seguridad global: alto a proposito, no debe molestar al usuario
-// normal. Los limites duros por endpoint van en routes/index.js.
-if (rateLimit.isTest) {
-  // En tests el limitador global molestaria (los tests hacen muchos requests).
-} else {
+// ===========================================================================
+// KEEP-WARM: SIEMPRE MONTADO, EL LIMITADOR GLOBAL SOLO EN PRODUCCION
+// ===========================================================================
+// Son dos decisiones separadas y por eso NO van en el mismo if.
+//
+// (1) El keep-warm se registra SIEMPRE, sin condiciones. La version anterior lo
+//     metio dentro del `else` de `if (rateLimit.isTest)`, o sea que con
+//     NODE_ENV=test la ruta NO existia. Los tests igual pasaban porque el unico
+//     archivo que lo cubria importaba el handler y lo llamaba directo: se
+//     probaba la logica, no que el endpoint estuviera montado. Un endpoint que
+//     solo se prueba importando su handler no esta probado.
+//
+// (2) El limitador global se registra SOLO fuera de tests, para que los tests
+//     puedan hacer muchos requests sin toparse el limite.
+//
+// (3) El keep-warm va ANTES del limiter a proposito. Si el limiter corriera
+//     primero, sus 429 taparian los 503/401 del endpoint y no habria forma de
+//     distinguir "la base esta caida" de "alguien esta abusando".
+//
+// TRADEOFF (lo que se paga por (1)+(3)): el endpoint queda fuera del limite
+// global, en cualquier entorno. Se acepta porque exige
+// `Authorization: Bearer <CRON_SECRET>`, sin secreto configurado responde 503
+// sin tocar la base, y con secreto equivocado responde 401 sin tocar la base
+// (ver api/health/keep-warm.js). O sea que el costo de dejarlo sin limite es
+// un request de diagnostico por corrida del cron, contra el beneficio de que el
+// diagnostico exista. Si alguna vez esto dejara de ser cierto (endpoint publico,
+// query sin autenticar), la respuesta es moverlo DETRAS del limiter y aceptar
+// perder el 503 limpio, noSACARLE el limite.
+const keepWarmHandler = require('../api/health/keep-warm');
+app.all('/api/health/keep-warm', keepWarmHandler);
+
+if (!rateLimit.isTest) {
   app.use('/api', rateLimit.globalLimiter());
 }
 

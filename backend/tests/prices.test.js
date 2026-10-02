@@ -29,6 +29,8 @@ const {
   createTestProduct,
   createTestService,
   createTestUser,
+  testEmail,
+  testDni,
 } = require('./helpers');
 
 // La capa de datos: TODOS los precios de este archivo se leen y se escriben
@@ -40,7 +42,15 @@ let api;
 let token;
 let producto;
 
-const ADMIN = { name: 'Admin Precios', email: 'admin.precios@test.com', password: 'admin123', dni: '44444444' };
+// Email y DNI unicos por corrida: con el fixture fijo, una corrida
+// interrumpida dejaba otro `admin.precios@test.com` y `findByEmail`
+// (order by id limit 1) autenticaba el de la corrida vieja. Ver helpers.testEmail.
+const ADMIN = {
+  name: 'Admin Precios',
+  email: testEmail('admin.precios'),
+  password: 'admin123',
+  dni: testDni('44444444'),
+};
 
 /**
  * El precio COMO QUEDA en la base, leido por la capa de datos.

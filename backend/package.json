@@ -7,7 +7,8 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "seed": "node src/db/seed.js",
-    "test": "node --test --test-concurrency=1 \"tests/*.test.js\""
+    "test": "node --test --test-concurrency=1 \"tests/*.test.js\"",
+    "test:reset": "node scripts/reset-test-db.js"
   },
   "keywords": [
     "ecommerce",

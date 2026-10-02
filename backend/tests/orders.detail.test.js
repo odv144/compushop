@@ -23,6 +23,8 @@ const {
   createTestService,
   createTestUser,
   CUSTOMER,
+  testEmail,
+  testDni,
 } = require('./helpers');
 
 // Este archivo miraba `store.js` porque los pedidos vivian ahi (fase 4). Ya no:
@@ -49,7 +51,10 @@ const login = async (email, password) => {
 before(async () => {
   await backupData();
   api = await startTestServer();
-  admin = await createTestUser({ name: 'Admin Detalle', email: 'admin.detalle@test.com', password: 'admin123', dni: '33333333', role: 'admin' });
+  // Email y DNI unicos por corrida: con el fixture fijo, este admin
+  // `admin.detalle@test.com` accumulaba una fila por corrida y `findByEmail`
+  // (order by id limit 1) devolvia la primera. Ver helpers.testEmail.
+  admin = await createTestUser({ name: 'Admin Detalle', email: testEmail('admin.detalle'), password: 'admin123', dni: testDni('33333333'), role: 'admin' });
   customer = await createTestUser(CUSTOMER);
   product = await createTestProduct({ name: 'Producto Detalle Test', price: 2500, stock: 50 });
   service = await createTestService({ name: 'Servicio Detalle Test', price: 8000 });

@@ -665,3 +665,58 @@ describe('Guards de UI: formato de precios y NumberInput de precio', () => {
     });
   }
 });
+
+
+describe('Orden de middleware (keep-warm vs limitador global)', () => {
+  // El predicado vive en tests/middleware-order.js porque su mutacion se prueba
+  // en guards-selftest.test.js: escrito dos veces, el selftest podria estar
+  // probando una copia que el guard real no usa. Ver la nota de ese archivo.
+  const { analizar, ordenKeepWarmValido, MOUNT, LIMITER } = require('./middleware-order');
+
+  test('keep-warm se monta ANTES del limitador global para no enmascarar diagnosticos', () => {
+    // Se analiza el ARCHIVO, no el comportamiento en runtime: en tests
+    // `rateLimit.isTest` hace que el limitador global NO se registre, asi que
+    // arrancar el server no mostraria el orden real.
+    const srcPath = path.join(BACKEND_ROOT, 'src', 'index.js');
+    const src = fs.readFileSync(srcPath, 'utf8');
+    const a = analizar(src);
+
+    assert.notEqual(a.mount, -1, `no se encontro el montaje de keep-warm (${MOUNT})`);
+    assert.notEqual(a.limiter, -1, `no se encontro el limitador global (${LIMITER})`);
+    assert.ok(
+      a.mount < a.limiter,
+      'keep-warm debe montarse ANTES del limitador global (503/401 no deben enmascararse con 429)',
+    );
+  });
+
+  test('el montaje de keep-warm es INCONDICIONAL (no adentro de un if)', () => {
+    // Esta es la regla que `indexOf` no podia ver. En la forma rota
+    // (`if (rateLimit.isTest) { } else { mount; limiter }`) el indexOf de la
+    // linea del mount daba un numero menor que el del limiter, asi que el guard
+    // de orden daba VERDE sobre el bug: la ruta no existia en tests y ningun test
+    // lo detectaba porque todos importaban el handler directo.
+    const src = fs.readFileSync(path.join(BACKEND_ROOT, 'src', 'index.js'), 'utf8');
+    const a = analizar(src);
+
+    assert.equal(
+      a.profundidadMount,
+      0,
+      'el montaje de keep-warm quedo adentro de un bloque: en NODE_ENV=test la ruta no se registra',
+    );
+  });
+
+  test('el limitador global sigue siendo condicional a NODE_ENV=test', () => {
+    const src = fs.readFileSync(path.join(BACKEND_ROOT, 'src', 'index.js'), 'utf8');
+    const a = analizar(src);
+
+    assert.ok(
+      a.limiterGuardadoPorIsTest,
+      'el limitador global debe quedar adentro de `if (!rateLimit.isTest)`: en tests los tests hacen muchos requests',
+    );
+  });
+
+  test('el predicado completo acepta el archivo real', () => {
+    const src = fs.readFileSync(path.join(BACKEND_ROOT, 'src', 'index.js'), 'utf8');
+    assert.ok(ordenKeepWarmValido(src), 'ordenKeepWarmValido deberia dar true sobre el archivo real');
+  });
+});
