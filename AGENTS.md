@@ -18,8 +18,8 @@ Documento de requerimientos y contexto actual de la aplicaciÃ³n para agentes d
 **URLs de producciÃ³n (referencia):**
 | Servicio  | URL |
 |-----------|-----|
-| Frontend  | `https://compushop-dun.vercel.app` |
-| Backend   | `https://compushop-backend.vercel.app` |
+| Frontend  | `https://front-compushop.vercel.app` |
+| Backend   | `https://compushop-ruby.vercel.app` |
 
 ---
 

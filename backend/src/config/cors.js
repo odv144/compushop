@@ -19,7 +19,7 @@ const DEV_ORIGINS = [
 
 // Dominio de produccion. Es el unico subdominio de Vercel permitido por
 // defecto; cualquier otro requiere opting in explicito por env.
-const PROD_ORIGIN = 'https://compushop-dun.vercel.app';
+const PROD_ORIGIN = 'https://front-compushop.vercel.app';
 
 const splitList = (value) =>
   String(value || '')
