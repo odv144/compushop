@@ -1,21 +1,21 @@
-﻿# AGENTS.md â€” Compushop
+﻿# AGENTS.md — Compushop
 
-Documento de requerimientos y contexto actual de la aplicaciÃ³n para agentes de desarrollo (humanos o IA).
+Documento de requerimientos y contexto actual de la aplicación para agentes de desarrollo (humanos o IA).
 
 ---
 
-## 1. DescripciÃ³n del producto
+## 1. Descripción del producto
 
-**Compushop** es un e-commerce fullstack para una casa de computaciÃ³n.
+**Compushop** es un e-commerce fullstack para una casa de computación.
 
 **Vende / ofrece:**
 - Notebooks, PCs de escritorio, componentes, monitores
 - Muebles de oficina e insumos
-- Servicios tÃ©cnicos (armado, reparaciÃ³n, mantenimiento, redes)
+- Servicios técnicos (armado, reparación, mantenimiento, redes)
 
-**Idioma de la interfaz:** espaÃ±ol (Argentina).
+**Idioma de la interfaz:** español (Argentina).
 
-**URLs de producciÃ³n (referencia):**
+**URLs de producción (referencia):**
 | Servicio  | URL |
 |-----------|-----|
 | Frontend  | `https://front-compushop.vercel.app` |
@@ -23,32 +23,32 @@ Documento de requerimientos y contexto actual de la aplicaciÃ³n para agentes d
 
 ---
 
-## 2. Stack tecnolÃ³gico
+## 2. Stack tecnológico
 
 ### Frontend
-| TecnologÃ­a | Uso |
+| Tecnología | Uso |
 |------------|-----|
 | React 18 | UI |
 | Vite 6 | Build / dev server |
 | Chakra UI 2 | Componentes y tema (claro/oscuro) |
 | React Router 6 | Rutas SPA |
 | Axios | Cliente HTTP |
-| React Icons | IconografÃ­a |
-| Framer Motion | Animaciones (vÃ­a Chakra) |
+| React Icons | Iconografía |
+| Framer Motion | Animaciones (vía Chakra) |
 
 ### Backend
-| TecnologÃ­a | Uso |
+| Tecnología | Uso |
 |------------|-----|
 | Node.js + Express 4 | API REST |
 | jsonwebtoken | Auth JWT |
-| bcryptjs | Hash de contraseÃ±as |
+| bcryptjs | Hash de contraseñas |
 | cors | CORS |
 | dotenv | Variables de entorno |
-| nodemailer | Emails (contacto / recuperaciÃ³n) |
+| nodemailer | Emails (contacto / recuperación) |
 | uuid | Tokens de reset de clave |
 | Store JSON (`src/db/store.js`) | Persistencia actual (archivo `data.json`) |
 
-> **Nota:** La persistencia es un store en archivo JSON (no SQLite en runtime de producciÃ³n). MigraciÃ³n futura prevista a SQLite / MySQL / MongoDB.
+> **Nota:** La persistencia es un store en archivo JSON (no SQLite en runtime de producción). Migración futura prevista a SQLite / MySQL / MongoDB.
 
 ### Deploy
 - Frontend y backend en **Vercel** (proyectos separados).
@@ -59,27 +59,27 @@ Documento de requerimientos y contexto actual de la aplicaciÃ³n para agentes d
 
 ## 3. Roles de usuario
 
-| Rol | DescripciÃ³n | Acceso |
+| Rol | Descripción | Acceso |
 |-----|-------------|--------|
-| `customer` | Cliente registrado | CatÃ¡logo, carrito, pedidos propios, perfil implÃ­cito vÃ­a JWT |
+| `customer` | Cliente registrado | Catálogo, carrito, pedidos propios, perfil implícito vía JWT |
 | `admin` | Administrador | Dashboard completo (CRUD, pedidos, usuarios, mensajes, settings, stats) |
-| AnÃ³nimo | Sin login | CatÃ¡logo, carrito local, confirmar pedido, contacto, registro/login |
+| Anónimo | Sin login | Catálogo, carrito local, confirmar pedido, contacto, registro/login |
 
 ---
 
-## 4. AutenticaciÃ³n (JWT)
+## 4. Autenticación (JWT)
 
 ### Requisitos vigentes
-- Registro de clientes con: nombre, email, password (mÃ­n. 6), DNI opcional, telÃ©fono, direcciÃ³n.
-- Login con email + password â†’ responde `{ user, token }`.
+- Registro de clientes con: nombre, email, password (mín. 6), DNI opcional, teléfono, dirección.
+- Login con email + password → responde `{ user, token }`.
 - Token JWT en header: `Authorization: Bearer <token>`.
 - Payload JWT: `id`, `email`, `role`, `name`.
-- ExpiraciÃ³n configurable (`JWT_EXPIRES_IN`, default `7d`).
-- RecuperaciÃ³n de clave **por DNI** (y email opcional de validaciÃ³n).
+- Expiración configurable (`JWT_EXPIRES_IN`, default `7d`).
+- Recuperación de clave **por DNI** (y email opcional de validación).
 - Reset de password con token de un solo uso (1 hora).
 - Frontend guarda `compushop_token` y `compushop_user` en `localStorage`.
-- Al cargar la app se valida sesiÃ³n con `GET /api/auth/me`.
-- Ante 401 (fuera de login/register) se limpia la sesiÃ³n.
+- Al cargar la app se valida sesión con `GET /api/auth/me`.
+- Ante 401 (fuera de login/register) se limpia la sesión.
 
 ### Credenciales demo (seed)
 | Rol | Email | Password | DNI |
@@ -89,33 +89,33 @@ Documento de requerimientos y contexto actual de la aplicaciÃ³n para agentes d
 
 ---
 
-## 5. Funcionalidades por Ã¡rea
+## 5. Funcionalidades por área
 
-### 5.1 PÃºblico (sin login obligatorio)
-- **Home:** hero â€œTecnologÃ­a NÃ­tidaâ€, about, productos destacados, banner promo, servicios, stats, CTA contacto.
-- **Productos:** listado con filtro por categorÃ­a y bÃºsqueda; detalle por slug/id.
-- **Servicios:** listado de servicios tÃ©cnicos.
+### 5.1 Público (sin login obligatorio)
+- **Home:** hero �œTecnología Nítida”, about, productos destacados, banner promo, servicios, stats, CTA contacto.
+- **Productos:** listado con filtro por categoría y búsqueda; detalle por slug/id.
+- **Servicios:** listado de servicios técnicos.
 - **Carrito:** Context + `localStorage`; agregar/quitar/cantidad; confirmar pedido (registra en backend y descuenta stock de productos).
-- **Contacto:** formulario (nombre, email, telÃ©fono, asunto, mensaje) â†’ guarda en DB + intenta envÃ­o SMTP.
+- **Contacto:** formulario (nombre, email, teléfono, asunto, mensaje) → guarda en DB + intenta envío SMTP.
 - **Auth UI:** login, registro, recuperar clave, reset password.
 - Tema claro / oscuro.
 
 ### 5.2 Carrito y pedidos
 - Carrito **solo frontend** hasta confirmar.
-- Al confirmar: `POST /api/orders` con items, datos de cliente y direcciÃ³n.
-- Puede ser anÃ³nimo o usuario logueado (`user_id` si hay JWT).
+- Al confirmar: `POST /api/orders` con items, datos de cliente y dirección.
+- Puede ser anónimo o usuario logueado (`user_id` si hay JWT).
 - Descuenta stock de productos; valida stock insuficiente.
 - Estados de pedido: `pending | confirmed | processing | shipped | delivered | cancelled`.
 - Admin puede cambiar estado; cliente solo ve sus pedidos.
 
 ### 5.3 Dashboard admin (`/admin/*`, solo `role === 'admin'`)
 - **Dashboard:** conteos (productos, servicios, clientes, pedidos, pendientes, mensajes sin leer, ingresos), pedidos recientes, stock bajo.
-- **Productos:** CRUD (nombre, descripciÃ³n, precio, stock, categorÃ­a, marca, imagen URL, activo).
-- **Servicios:** CRUD (nombre, descripciÃ³n, precio, duraciÃ³n, imagen, activo).
+- **Productos:** CRUD (nombre, descripción, precio, stock, categoría, marca, imagen URL, activo).
+- **Servicios:** CRUD (nombre, descripción, precio, duración, imagen, activo).
 - **Pedidos:** listado + cambio de estado.
 - **Usuarios:** listado, eliminar (no auto-eliminarse).
-- **Mensajes:** listado de contacto, marcar leÃ­do.
-- **ConfiguraciÃ³n:** datos de tienda + SMTP (host, port, user, pass, from, contact_to).
+- **Mensajes:** listado de contacto, marcar leído.
+- **Configuración:** datos de tienda + SMTP (host, port, user, pass, from, contact_to).
 
 ---
 
@@ -147,28 +147,28 @@ Base URL producción: `https://compushop-ruby.vercel.app/api`
 Base URL local: `http://localhost:4000/api`
 
 ### Auth
-| MÃ©todo | Ruta | Auth | DescripciÃ³n |
+| Método | Ruta | Auth | Descripción |
 |--------|------|------|-------------|
-| POST | `/auth/register` | â€” | Registro customer |
-| POST | `/auth/login` | â€” | Login â†’ JWT |
+| POST | `/auth/register` | — | Registro customer |
+| POST | `/auth/login` | — | Login → JWT |
 | GET | `/auth/me` | JWT | Usuario actual |
-| POST | `/auth/forgot-password` | â€” | Solicitud reset por DNI |
-| POST | `/auth/reset-password` | â€” | Nueva password con token |
+| POST | `/auth/forgot-password` | — | Solicitud reset por DNI |
+| POST | `/auth/reset-password` | — | Nueva password con token |
 
-### CatÃ¡logo
-| MÃ©todo | Ruta | Auth | DescripciÃ³n |
+### Catálogo
+| Método | Ruta | Auth | Descripción |
 |--------|------|------|-------------|
-| GET | `/products` | â€” | Listado (query: category, search, active, page, limit) |
-| GET | `/products/:id` | â€” | Detalle (id o slug) |
+| GET | `/products` | — | Listado (query: category, search, active, page, limit) |
+| GET | `/products/:id` | — | Detalle (id o slug) |
 | POST/PUT/DELETE | `/products` / `/:id` | admin | CRUD |
-| GET | `/services` | â€” | Listado |
-| GET | `/services/:id` | â€” | Detalle |
+| GET | `/services` | — | Listado |
+| GET | `/services/:id` | — | Detalle |
 | POST/PUT/DELETE | `/services` / `/:id` | admin | CRUD |
-| GET | `/categories` | â€” | Listado + product_count |
+| GET | `/categories` | — | Listado + product_count |
 | POST/PUT/DELETE | `/categories` / `/:id` | admin | CRUD |
 
 ### Pedidos
-| MÃ©todo | Ruta | Auth | DescripciÃ³n |
+| Método | Ruta | Auth | Descripción |
 |--------|------|------|-------------|
 | POST | `/orders` | opcional | Confirmar pedido |
 | GET | `/orders` | JWT | Lista (admin: todos; customer: propios) |
@@ -193,18 +193,18 @@ Base URL local: `http://localhost:4000/api`
 
 ## 8. Rutas frontend
 
-| Ruta | PÃ¡gina | ProtecciÃ³n |
+| Ruta | Página | Protección |
 |------|--------|------------|
-| `/` | Home | PÃºblica |
-| `/productos` | CatÃ¡logo | PÃºblica |
-| `/producto/:id` | Detalle producto | PÃºblica |
-| `/servicios` | Servicios | PÃºblica |
-| `/carrito` | Carrito + checkout | PÃºblica |
-| `/login` | Login | PÃºblica |
-| `/registro` | Registro | PÃºblica |
-| `/contacto` | Contacto | PÃºblica |
-| `/recuperar-clave` | Forgot password | PÃºblica |
-| `/reset-password` | Reset password | PÃºblica |
+| `/` | Home | Pública |
+| `/productos` | Catálogo | Pública |
+| `/producto/:id` | Detalle producto | Pública |
+| `/servicios` | Servicios | Pública |
+| `/carrito` | Carrito + checkout | Pública |
+| `/login` | Login | Pública |
+| `/registro` | Registro | Pública |
+| `/contacto` | Contacto | Pública |
+| `/recuperar-clave` | Forgot password | Pública |
+| `/reset-password` | Reset password | Pública |
 | `/admin` | Dashboard | Solo admin |
 | `/admin/productos` | CRUD productos | Solo admin |
 | `/admin/servicios` | CRUD servicios | Solo admin |
@@ -215,16 +215,16 @@ Base URL local: `http://localhost:4000/api`
 
 ---
 
-## 9. DiseÃ±o UI (requerimientos visuales actuales)
+## 9. Diseño UI (requerimientos visuales actuales)
 
 - Estilo: corporativo, moderno, minimalista.
-- InspiraciÃ³n de layout tipo plantilla Mobirise (navbar pill, hero full-bleed, cards redondeadas) **con paleta azul original del proyecto**.
+- Inspiración de layout tipo plantilla Mobirise (navbar pill, hero full-bleed, cards redondeadas) **con paleta azul original del proyecto**.
 - Paleta `brand` (Chakra):
   - Principal: `#0066e6` (`brand.500`)
   - Hover/darker: `#0052b3` (`brand.600`)
-- Navbar flotante tipo â€œpillâ€, sticky, con blur.
+- Navbar flotante tipo �œpill”, sticky, con blur.
 - Botones `borderRadius: full`.
-- Cards de producto con imagen, precio, CTA â€œComprar Ahoraâ€ / â€œContratarâ€.
+- Cards de producto con imagen, precio, CTA �œComprar Ahora” / �œContratar”.
 - Soporte **tema claro y oscuro** (toggle).
 - Responsive (mobile drawer en navbar).
 
@@ -233,20 +233,20 @@ Base URL local: `http://localhost:4000/api`
 ## 10. Variables de entorno
 
 ### Backend (`backend/.env`)
-| Variable | Requerida | DescripciÃ³n |
+| Variable | Requerida | Descripción |
 |----------|-----------|-------------|
 | `PORT` | no | Default `4000` |
-| `JWT_SECRET` | **obligatoria en prod** | Secreto de firma JWT. Sin ella el server **falla al arrancar** en producciÃ³n (no hay fallback). |
+| `JWT_SECRET` | **obligatoria en prod** | Secreto de firma JWT. Sin ella el server **falla al arrancar** en producción (no hay fallback). |
 | `JWT_EXPIRES_IN` | no | Default `7d` |
-| `FRONTEND_URL` | recomendada | Origen CORS del front **y** host del link de recuperaciÃ³n de contraseÃ±a |
-| `SMTP_*` / settings en DB | opcional | Email real; si falta, el mensaje se guarda igual. `dev_token` solo se devuelve fuera de producciÃ³n |
+| `FRONTEND_URL` | recomendada | Origen CORS del front **y** host del link de recuperación de contraseña |
+| `SMTP_*` / settings en DB | opcional | Email real; si falta, el mensaje se guarda igual. `dev_token` solo se devuelve fuera de producción |
 
 ### Frontend (`VITE_*` en build)
-| Variable | Requerida | DescripciÃ³n |
+| Variable | Requerida | Descripción |
 |----------|-----------|-------------|
 | `VITE_API_URL` | **sí en prod** | Ej. `https://compushop-ruby.vercel.app/api` |
 
-Fallback en cÃ³digo: en localhost â†’ `http://localhost:4000/api`; fuera de localhost â†’ URL del backend Vercel hardcodeada como respaldo.
+Fallback en código: en localhost → `http://localhost:4000/api`; fuera de localhost → URL del backend Vercel hardcodeada como respaldo.
 
 ### CORS
 Allowlist **explícita**, sin comodines. Fuente de verdad: `backend/src/config/cors.js`.
@@ -337,7 +337,7 @@ Hacen backup y restauran `src/db/data.json`, asi que se pueden correr contra dat
 
 | Archivo | Que cubre |
 |---------|-----------|
-| `orders.security.test.js` | Regresion del exploit de precio: precio/nombre resueltos server-side, quantity entero â‰¥ 1, stock, productos inactivos, servicios |
+| `orders.security.test.js` | Regresion del exploit de precio: precio/nombre resueltos server-side, quantity entero ≥ 1, stock, productos inactivos, servicios |
 | `auth.security.test.js` | Login, `/auth/me`, fail-fast de `JWT_SECRET`, `alg:none`, expiracion, `dev_token` solo en dev, roles (403), IDOR en pedidos, no auto-borrado, no hash filtrado |
 | `architecture.test.js` | Guardas de estructura: no reintroducir `database.js` ni controllers muertos, imports no rotos, y reglas de seguridad (precio server-side, HS256 pin, link de reset) |
 
@@ -345,20 +345,20 @@ Un fallo en cualquiera de estos = regresion de seguridad o de estructura. No ign
 
 ---
 
-## 14. Criterios para cambios futuros (guÃ­a para agentes)
+## 14. Criterios para cambios futuros (guía para agentes)
 
 Al modificar o extender Compushop:
 
-1. Mantener **espaÃ±ol** en UI y mensajes de error de API orientados al usuario.
-2. Respetar roles: operaciones de escritura de catÃ¡logo/settings/usuarios solo **admin**.
+1. Mantener **español** en UI y mensajes de error de API orientados al usuario.
+2. Respetar roles: operaciones de escritura de catálogo/settings/usuarios solo **admin**.
 3. No romper el contrato JWT ni las keys de `localStorage` sin migrar el front.
 4. Cualquier nueva entidad debe integrarse al **store** (o a la DB que lo reemplace) y exponerse por `/api`.
 5. El carrito permanece en cliente hasta `POST /orders`.
-6. Preservar paleta azul `brand` y estilo de UI (pill navbar, radii grandes) salvo pedido explÃ­cito de rediseÃ±o.
+6. Preservar paleta azul `brand` y estilo de UI (pill navbar, radii grandes) salvo pedido explícito de rediseño.
 7. Variables `VITE_*` requieren **rebuild/redeploy** del frontend en Vercel.
 8. No commitear `.env` ni `data.json` con secretos o datos sensibles.
-9. **Nunca confiar precio, nombre ni existencia vindos del body del cliente.** `POST /orders` los resuelve desde el store (`routes/index.js`). Un `curl` puede mandar cualquier `price`; si se usa ese valor, es una pÃ©rdida de plata directa. Misma regla aplica a cualquier cantidad usada para aritmÃ©tica: validar entero â‰¥ 1 (un `quantity` negativo incrementaba el stock).
+9. **Nunca confiar precio, nombre ni existencia vindos del body del cliente.** `POST /orders` los resuelve desde el store (`routes/index.js`). Un `curl` puede mandar cualquier `price`; si se usa ese valor, es una pérdida de plata directa. Misma regla aplica a cualquier cantidad usada para aritmética: validar entero ≥ 1 (un `quantity` negativo incrementaba el stock).
 
 ---
 
-*Ãšltima actualizaciÃ³n alineada al estado del proyecto en el repositorio de trabajo Compushop (frontend React/Chakra + backend Express/JWT + deploy Vercel).*
+*Última actualización alineada al estado del proyecto en el repositorio de trabajo Compushop (frontend React/Chakra + backend Express/JWT + deploy Vercel).*
