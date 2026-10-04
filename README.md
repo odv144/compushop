@@ -6,8 +6,8 @@ E-commerce fullstack: **React + Chakra UI** (frontend) y **Node.js + Express + J
 
 | Servicio  | URL |
 |-----------|-----|
-| Frontend  | https://compushop-dun.vercel.app |
-| Backend   | https://compushop-backend.vercel.app |
+| Frontend  | https://front-compushop.vercel.app |
+| Backend   | https://compushop-ruby.vercel.app |
 
 ## Credenciales demo
 
@@ -63,10 +63,10 @@ git push -u origin main
 | Name | Value |
 |------|--------|
 | `JWT_SECRET` | un secreto largo y aleatorio |
-| `FRONTEND_URL` | `https://compushop-dun.vercel.app` |
+| `FRONTEND_URL` | `https://front-compushop.vercel.app` |
 | `JWT_EXPIRES_IN` | `7d` |
 
-Después del primer deploy, anotá la URL (ej. `https://compushop-backend.vercel.app`).
+Después del primer deploy, anotá la URL (ej. `https://compushop-ruby.vercel.app`).
 
 En el servidor, ejecutá el seed una vez si no hay datos (o incluí seed en el arranque).
 
@@ -80,7 +80,7 @@ En el servidor, ejecutá el seed una vez si no hay datos (o incluí seed en el a
 
 | Name | Value |
 |------|--------|
-| `VITE_API_URL` | `https://compushop-backend.vercel.app/api` |
+| `VITE_API_URL` | `https://compushop-ruby.vercel.app/api` |
 
 > Sin esta variable el build no apunta al backend de producción.  
 > Después de cambiar variables, hacé **Redeploy**.

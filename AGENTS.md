@@ -143,7 +143,7 @@ pm run seed en backend (12 productos, 4 servicios, 6 categorías, 2 usuarios, se
 
 ## 7. API REST (`/api`)
 
-Base URL producciÃ³n: `https://compushop-backend.vercel.app/api`  
+Base URL producción: `https://compushop-ruby.vercel.app/api`  
 Base URL local: `http://localhost:4000/api`
 
 ### Auth
@@ -244,12 +244,28 @@ Base URL local: `http://localhost:4000/api`
 ### Frontend (`VITE_*` en build)
 | Variable | Requerida | DescripciÃ³n |
 |----------|-----------|-------------|
-| `VITE_API_URL` | **sÃ­ en prod** | Ej. `https://compushop-backend.vercel.app/api` |
+| `VITE_API_URL` | **sí en prod** | Ej. `https://compushop-ruby.vercel.app/api` |
 
 Fallback en cÃ³digo: en localhost â†’ `http://localhost:4000/api`; fuera de localhost â†’ URL del backend Vercel hardcodeada como respaldo.
 
 ### CORS
-OrÃ­genes permitidos: localhost:5173/3000, `https://compushop-dun.vercel.app`, `FRONTEND_URL`, y cualquier `*.vercel.app`.
+Allowlist **explícita**, sin comodines. Fuente de verdad: `backend/src/config/cors.js`.
+
+| Origen | Estado |
+|--------|--------|
+| `https://front-compushop.vercel.app` | SIEMPRE permitido (`PROD_ORIGIN`, hardcodeado en `cors.js`) |
+| `http://localhost:5173` / `:3000` / `:4173` / `127.0.0.1:*` | Solo fuera de produccion (`DEV_ORIGINS`) |
+| `FRONTEND_URL` / `ALLOWED_ORIGINS` | Listas separadas por coma, leidas del env |
+| `ALLOWED_ORIGIN_PATTERNS` | Regex de **opt-in explicito**. Viene **VACIA por defecto** |
+
+**NO existe ningun wildcard `*.vercel.app`.** Cualquier otro subdominio de Vercel queda
+rechazado con 403, y CORS solo impide *leer* la respuesta: por eso el guard de origen
+corta el trabajo antes de tocar la base de datos.
+
+Cambiar de dominio frontend obliga a tocar `PROD_ORIGIN` en `cors.js`, o a setear
+`FRONTEND_URL` en Vercel **y redesplegar** (las env vars solo existen en el deploy).
+
+Regresion cubierta por `backend/tests/cors.test.js`.
 
 ---
 
